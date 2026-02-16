@@ -15,7 +15,7 @@ In Claude Code, run:
 
 ### 2. Connect to Screenote
 
-The plugin uses OAuth 2.1 — no API key needed. On first use, Claude Code will open a browser window to authorize access to your Screenote account.
+On first use, Claude Code will open a browser window to authorize access to your Screenote account.
 
 ### 3. Use it
 
