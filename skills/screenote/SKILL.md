@@ -32,8 +32,7 @@ Call the `list_projects` MCP tool to get the user's Screenote projects. Each pro
 
 **Matching logic:**
 - If a Screenote project name matches the local project name (case-insensitive), use it automatically
-- If no match is found, ask the user: list existing project names and offer to create a new one matching the local project name via the `create_project` MCP tool
-- If there's only one Screenote project, use it regardless of name match
+- If no match is found (even if there's only one project), ask the user: list existing project names and offer to create a new one matching the local project name via the `create_project` MCP tool
 
 ### Step 2: Resolve the URL
 
