@@ -13,15 +13,9 @@ In Claude Code, run:
 /plugin install claude-screenote@screenote-marketplace
 ```
 
-### 2. Add your API key
+### 2. Connect to Screenote
 
-Go to your project in [Screenote](https://screenote.ai), open **API Keys**, and create a new key. Then add it to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
-
-```bash
-export SCREENOTE_API_KEY="sk_proj_..."
-```
-
-Restart your terminal or run `source ~/.zshrc` for the change to take effect.
+The plugin uses OAuth 2.1 — no API key needed. On first use, Claude Code will open a browser window to authorize access to your Screenote account.
 
 ### 3. Use it
 
@@ -34,7 +28,7 @@ Tell Claude Code to screenshot a page:
 You'll get a link to annotate the screenshot in Screenote. Draw on it, leave comments, then pull the feedback back:
 
 ```
-/screenote feedback 42
+/screenote feedback
 ```
 
 Claude sees every annotation with its position and comment, and can start fixing things right away.
@@ -53,7 +47,7 @@ You                       Claude Code                  Screenote
  │                            │                            │
  │  "ok read my feedback"     │                            │
  │ ──────────────────────────►│                            │
- │                            │── /screenote feedback 42 ─►│
+ │                            │── /screenote feedback ────►│
  │                            │◄── annotations + regions ──│
  │                            │                            │
  │                            │  (fixes code based on      │
@@ -78,10 +72,10 @@ Works with any URL your machine can reach — localhost, staging, production.
 After you've annotated the screenshot in Screenote:
 
 ```
-/screenote feedback 42
+/screenote feedback
 ```
 
-Claude presents each annotation with its position and comment, then offers to fix the issues.
+Claude matches your local project name to a Screenote project, lists recent screenshots by title, and lets you pick one. Each annotation is presented with its position and comment, then Claude offers to fix the issues.
 
 ### Natural language
 
@@ -93,11 +87,15 @@ You can also just describe what you want:
 
 Claude will figure out the URL from your project's routes.
 
+### Project matching
+
+The plugin automatically matches your local working directory name to a Screenote project. If no match is found, it asks you to pick an existing project or create a new one.
+
 ## Requirements
 
-- A [Screenote](https://screenote.ai) account with at least one project
-- An API key from your project settings
+- A [Screenote](https://screenote.ai) account
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
+- [Playwright plugin](https://github.com/anthropics/claude-plugins-official) for browser screenshots
 
 ## License
 
