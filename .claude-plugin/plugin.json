@@ -1,18 +1,19 @@
 {
   "name": "claude-screenote",
   "version": "1.0.0",
-  "description": "Visual feedback loop for Claude Code — screenshot, annotate, fix",
+  "description": "Screenshot pages, upload to Screenote for human annotation, and retrieve visual feedback — all from Claude Code.",
   "author": {
-    "name": "Ivan Kuznetsov",
-    "url": "https://github.com/ivankuznetsov"
+    "name": "ivankuznetsov"
   },
-  "repository": "https://github.com/ivankuznetsov/claude-screenote",
   "license": "MIT",
-  "mcpServers": {
-    "pw": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-playwright@latest"]
-    }
-  }
+  "repository": "https://github.com/ivankuznetsov/claude-screenote",
+  "keywords": [
+    "claude-skill",
+    "claude-code",
+    "screenote",
+    "visual-feedback",
+    "screenshot",
+    "annotation",
+    "design-review"
+  ]
 }
