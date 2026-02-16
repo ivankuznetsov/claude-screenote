@@ -90,6 +90,42 @@ You can also just describe what you want:
 
 Claude will figure out the URL from your project's routes.
 
+## Troubleshooting
+
+### EXDEV error during install
+
+If you see `EXDEV: cross-device link not permitted` when installing, this is a [known Claude Code bug](https://github.com/anthropics/claude-code/issues/18115) on Linux systems where `/home` and `/tmp` are on different filesystems (common with `tmpfs`).
+
+Workaround — install manually:
+
+```bash
+# 1. Add the marketplace
+/plugin marketplace add ivankuznetsov/claude-screenote
+
+# 2. Copy plugin to the cache
+PLUGIN_DIR="$HOME/.claude/plugins/cache/claude-screenote/claude-screenote/1.0.0"
+mkdir -p "$PLUGIN_DIR"
+cp -r "$HOME/.claude/plugins/marketplaces/claude-screenote/"{.claude-plugin,skills,LICENSE,README.md} "$PLUGIN_DIR/"
+
+# 3. Register it (add this entry to ~/.claude/plugins/installed_plugins.json under "plugins")
+```
+
+Add this to the `"plugins"` object in `~/.claude/plugins/installed_plugins.json`:
+
+```json
+"claude-screenote@claude-screenote": [
+  {
+    "scope": "user",
+    "installPath": "<your-home>/.claude/plugins/cache/claude-screenote/claude-screenote/1.0.0",
+    "version": "1.0.0",
+    "installedAt": "2025-01-01T00:00:00.000Z",
+    "lastUpdated": "2025-01-01T00:00:00.000Z"
+  }
+]
+```
+
+Replace `<your-home>` with your actual home directory path. Restart Claude Code after.
+
 ## Requirements
 
 - A [Screenote](https://screenote.ai) account with at least one project
