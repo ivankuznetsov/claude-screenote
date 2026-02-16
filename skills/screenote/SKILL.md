@@ -44,18 +44,23 @@ Use the Playwright browser tools to navigate and screenshot:
 
 ### Step 4: Upload to Screenote
 
-Read the screenshot file and base64-encode it, then call the `create_screenshot` MCP tool:
+Call the `create_screenshot_upload` MCP tool to get a signed upload URL:
 
 ```
-Tool: create_screenshot
+Tool: create_screenshot_upload
 Arguments:
   project_id: <from step 1>
   title: <descriptive title based on the URL or user input>
-  image_base64: <base64-encoded PNG data>
   mime_type: "image/png"
 ```
 
-The response includes `screenshot_id` and `annotate_url`.
+Then upload the file directly via curl (the image bytes never enter the LLM context):
+
+```bash
+curl -X PUT -H 'Content-Type: image/png' --data-binary @/tmp/screenote-capture.png '<upload_url>'
+```
+
+The MCP tool response includes `screenshot_id`, `upload_url`, and `annotate_url`.
 
 ### Step 5: Report to User
 
