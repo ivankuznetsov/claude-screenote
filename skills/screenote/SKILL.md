@@ -2,7 +2,7 @@
 name: screenote
 description: Capture a page screenshot, upload to Screenote for human annotation, and retrieve feedback
 user_invocable: true
-argument: "[url-or-description] or 'feedback [screenshot-id]'"
+argument: "[url-or-description] or 'feedback'"
 ---
 
 # Screenote — Visual Feedback Loop
@@ -73,7 +73,7 @@ The MCP tool response includes `screenshot_id`, `upload_url`, and `annotate_url`
 Tell the user:
 - The screenshot was uploaded successfully
 - Provide the **annotate URL** so they can open it in the browser and add annotations
-- Tell them to run `/screenote feedback <screenshot_id>` when they're done annotating
+- Tell them to run `/screenote feedback` when they're done annotating
 
 Clean up the temp file:
 ```bash
@@ -84,15 +84,15 @@ rm -f /tmp/screenote-capture.png
 
 ## Feedback Mode
 
-The user ran `/screenote feedback [screenshot-id]`. Your job: fetch annotations and present the feedback.
+The user ran `/screenote feedback`. Your job: fetch annotations and present the feedback.
 
-### Step 1: Parse the Screenshot ID
+### Step 1: Pick a Project
 
-Extract the screenshot ID from the argument. If not provided, call `list_screenshots` to show recent screenshots and ask the user which one.
+Follow the same matching logic as Capture Mode Step 1: match local project name to Screenote project names, ask user if no match.
 
-### Step 2: Pick a Project
+### Step 2: Pick a Screenshot
 
-If you don't already know the project, follow the same matching logic as Capture Mode Step 1: match local project name to Screenote project names, ask user or create if no match.
+Call `list_screenshots` for the matched project. Show the user a list of recent screenshots by **title** and let them pick one. If there's only one screenshot, use it automatically.
 
 ### Step 3: Fetch Annotations
 
