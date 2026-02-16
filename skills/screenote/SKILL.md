@@ -2,7 +2,7 @@
 name: screenote
 description: Capture a page screenshot, upload to Screenote for human annotation, and retrieve feedback
 user_invocable: true
-argument: "[url-or-description] or 'feedback'"
+argument: "[mobile] [url-or-description] or 'feedback'"
 ---
 
 # Screenote — Visual Feedback Loop
@@ -16,7 +16,8 @@ Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.jso
 Parse the user's argument:
 
 - If the argument starts with `feedback` → go to **Feedback Mode**
-- Otherwise → go to **Capture Mode**
+- If the argument starts with `mobile` → go to **Capture Mode** with **mobile viewport** (strip `mobile` from the argument, the rest is the URL/description)
+- Otherwise → go to **Capture Mode** with **desktop viewport**
 
 ---
 
@@ -40,13 +41,19 @@ Call the `list_projects` MCP tool to get the user's Screenote projects. Each pro
 - If it looks like a relative path (e.g., `/login`, `dashboard`), prepend `http://localhost:3000/`
 - If it's a description (e.g., "login page"), figure out the URL from context (check routes, running servers, etc.)
 
-### Step 3: Take Screenshot
+### Step 3: Set Viewport and Take Screenshot
 
-Use the Playwright browser tools to navigate and screenshot:
+**Before navigating**, resize the browser to the correct viewport:
 
-1. Navigate to the URL using `browser_navigate`
-2. Wait for the page to be ready (use `browser_wait_for` if needed for dynamic content)
-3. Take a full-page screenshot: use `browser_take_screenshot` with `filename` set to `/tmp/screenote-capture.png` and `type` set to `png`
+- **Desktop** (default): `browser_resize` to **1440 x 900**
+- **Mobile** (when `mobile` keyword was used): `browser_resize` to **393 x 852** (iPhone 15)
+
+Then use the Playwright browser tools to navigate and screenshot:
+
+1. Resize the browser using `browser_resize` with the appropriate width and height
+2. Navigate to the URL using `browser_navigate`
+3. Wait for the page to be ready (use `browser_wait_for` if needed for dynamic content)
+4. Take a full-page screenshot: use `browser_take_screenshot` with `filename` set to `/tmp/screenote-capture.png` and `type` set to `png`
 
 ### Step 4: Upload to Screenote
 
@@ -56,7 +63,7 @@ Call the `create_screenshot_upload` MCP tool to get a signed upload URL:
 Tool: create_screenshot_upload
 Arguments:
   project_id: <from step 1>
-  title: <descriptive title based on the URL or user input>
+  title: <descriptive title> — append "(mobile)" if mobile viewport was used
   mime_type: "image/png"
 ```
 
