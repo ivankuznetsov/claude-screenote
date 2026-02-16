@@ -26,7 +26,14 @@ The user provided a URL or page description. Your job: screenshot it, upload to 
 
 ### Step 1: Pick a Project
 
-Call the `list_projects` MCP tool (no arguments) to get the user's projects. Each project has an `id` and a `name`. Always refer to projects by **name** when communicating with the user — use the `id` only internally for API calls. If there's only one project, use it. If multiple, pick the most relevant one based on name or ask the user by listing project names.
+Determine the **local project name** from the current working directory (e.g., the repo/folder name).
+
+Call the `list_projects` MCP tool to get the user's Screenote projects. Each project has an `id` and a `name`. Always refer to projects by **name** — use `id` only internally for API calls.
+
+**Matching logic:**
+- If a Screenote project name matches the local project name (case-insensitive), use it automatically
+- If no match is found, ask the user: list existing project names and offer to create a new one matching the local project name via the `create_project` MCP tool
+- If there's only one Screenote project, use it regardless of name match
 
 ### Step 2: Resolve the URL
 
@@ -86,7 +93,7 @@ Extract the screenshot ID from the argument. If not provided, call `list_screens
 
 ### Step 2: Pick a Project
 
-If you don't already know the project, call `list_projects` to get it. Always refer to projects by **name** when communicating with the user. If only one project, use it.
+If you don't already know the project, follow the same matching logic as Capture Mode Step 1: match local project name to Screenote project names, ask user or create if no match.
 
 ### Step 3: Fetch Annotations
 
