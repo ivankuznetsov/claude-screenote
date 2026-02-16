@@ -26,7 +26,7 @@ The user provided a URL or page description. Your job: screenshot it, upload to 
 
 ### Step 1: Pick a Project
 
-Call the `list_projects` MCP tool (no arguments) to get the user's projects. If there's only one project, use it. If multiple, pick the most relevant one or ask the user.
+Call the `list_projects` MCP tool (no arguments) to get the user's projects. Each project has an `id` and a `name`. Always refer to projects by **name** when communicating with the user — use the `id` only internally for API calls. If there's only one project, use it. If multiple, pick the most relevant one based on name or ask the user by listing project names.
 
 ### Step 2: Resolve the URL
 
@@ -86,7 +86,7 @@ Extract the screenshot ID from the argument. If not provided, call `list_screens
 
 ### Step 2: Pick a Project
 
-If you don't already know the project ID, call `list_projects` to get it. If only one project, use it.
+If you don't already know the project, call `list_projects` to get it. Always refer to projects by **name** when communicating with the user. If only one project, use it.
 
 ### Step 3: Fetch Annotations
 
