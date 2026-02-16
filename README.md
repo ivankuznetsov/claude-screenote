@@ -1,8 +1,8 @@
 # claude-screenote
 
-Visual feedback loop for Claude Code. Screenshot a page, upload to [Screenote](https://screenote.ai) for human annotation, then read the feedback — all from your terminal.
+Give your AI coding agent eyes. Screenshot any page, annotate it in Screenote, and let Claude Code read your feedback — all without leaving the terminal.
 
-## Setup
+## Quick Start
 
 ### 1. Install the plugin
 
@@ -10,71 +10,91 @@ Visual feedback loop for Claude Code. Screenshot a page, upload to [Screenote](h
 claude plugin add ivankuznetsov/claude-screenote
 ```
 
-### 2. Set your API key
+### 2. Add your API key
 
-Get an API key from your Screenote project settings, then add it to your environment:
+Go to your project in [Screenote](https://screenote.ai), open **API Keys**, and create a new key. Then add it to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
 ```bash
 export SCREENOTE_API_KEY="sk_proj_..."
 ```
 
-For a self-hosted instance:
+Restart your terminal or run `source ~/.zshrc` for the change to take effect.
 
-```bash
-export SCREENOTE_URL="https://your-instance.example.com"
-```
+### 3. Use it
 
-## Usage
-
-### Capture a page
+Tell Claude Code to screenshot a page:
 
 ```
 /screenote http://localhost:3000/login
 ```
 
-This will:
-1. Open the URL in a headless browser
-2. Take a viewport screenshot
-3. Upload it to Screenote
-4. Return a link where you (or your team) can annotate it
-
-### Read feedback
-
-After annotating in Screenote, pull the feedback back into Claude Code:
+You'll get a link to annotate the screenshot in Screenote. Draw on it, leave comments, then pull the feedback back:
 
 ```
 /screenote feedback 42
 ```
 
-This fetches all open annotations for screenshot #42 and presents them with coordinates and comments.
-
-### Relative paths
-
-If you're working on a local dev server:
-
-```
-/screenote /dashboard
-/screenote /users/new
-```
-
-These are resolved against `http://localhost:3000` by default.
+Claude sees every annotation with its position and comment, and can start fixing things right away.
 
 ## How It Works
 
 ```
-Claude Code                    Screenote                    Human
-    │                              │                          │
-    ├── /screenote /login ────────►│                          │
-    │   (screenshot + upload)      │                          │
-    │                              │◄── annotate in browser ──┤
-    │                              │                          │
-    ├── /screenote feedback 42 ───►│                          │
-    │   (fetch annotations)        │                          │
-    │                              │                          │
-    ├── fix code ──────────────────┤                          │
-    │                              │                          │
-    └── /screenote /login ────────►│  (verify fix)            │
+You                       Claude Code                  Screenote
+ │                            │                            │
+ │  "fix the login page"      │                            │
+ │ ──────────────────────────►│                            │
+ │                            │── /screenote /login ──────►│
+ │                            │                            │
+ │            open link, draw annotations, leave comments  │
+ │ ◄──────────────────────────────────────────────────────►│
+ │                            │                            │
+ │  "ok read my feedback"     │                            │
+ │ ──────────────────────────►│                            │
+ │                            │── /screenote feedback 42 ─►│
+ │                            │◄── annotations + regions ──│
+ │                            │                            │
+ │                            │  (fixes code based on      │
+ │                            │   your visual feedback)     │
+ │                            │                            │
+ │                            │── /screenote /login ──────►│
+ │                            │  (screenshot to verify)     │
 ```
+
+## Usage
+
+### Screenshot a page
+
+```
+/screenote https://myapp.com/dashboard
+```
+
+Works with any URL your machine can reach — localhost, staging, production.
+
+### Read annotations
+
+After you've annotated the screenshot in Screenote:
+
+```
+/screenote feedback 42
+```
+
+Claude presents each annotation with its position and comment, then offers to fix the issues.
+
+### Natural language
+
+You can also just describe what you want:
+
+```
+/screenote the signup page
+```
+
+Claude will figure out the URL from your project's routes.
+
+## Requirements
+
+- A [Screenote](https://screenote.ai) account with at least one project
+- An API key from your project settings
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
 
 ## License
 
