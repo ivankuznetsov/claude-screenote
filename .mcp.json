@@ -2,7 +2,7 @@
   "mcpServers": {
     "screenote": {
       "type": "http",
-      "url": "${SCREENOTE_URL:-https://screenote.ai}/mcp"
+      "url": "${SCREENOTE_URL:-https://screenote.ai}/mcp/messages"
     }
   }
 }
