@@ -21,19 +21,33 @@ Parse the user's argument:
 
 ---
 
+## Project Cache
+
+Before calling `list_projects`, check for a cached project selection:
+
+1. Try to read `.claude/screenote-cache.json` (relative to cwd). If the file does not exist, skip to step 2. If it exists and contains valid JSON with `project_id` and `project_name`, use that project and skip the "Pick a Project" step. Print: "Using cached Screenote project: **\<name\>** (delete `.claude/screenote-cache.json` to switch)"
+2. If the file is missing or invalid, proceed with the normal "Pick a Project" step below. After successful selection, write `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` (create the `.claude/` directory if needed).
+3. If any tool call that uses the cached `project_id` returns a response containing `"error": "forbidden"` or `"error": "not_found"`, the cache is stale. Delete the cache file and re-run the "Pick a Project" step.
+
+---
+
 ## Capture Mode
 
 The user provided a URL or page description. Your job: screenshot it, upload to Screenote, return the annotation URL.
 
 ### Step 1: Pick a Project
 
-Determine the **local project name** from the current working directory (e.g., the repo/folder name).
+**Check the Project Cache first** (see Project Cache section). If the cache provides a valid project, skip to Step 2.
+
+If no cache, determine the **local project name** from the current working directory (e.g., the repo/folder name).
 
 Call the `list_projects` MCP tool to get the user's Screenote projects. Each project has an `id` and a `name`. Always refer to projects by **name** — use `id` only internally for API calls.
 
 **Matching logic:**
 - If a Screenote project name matches the local project name (case-insensitive), use it automatically
 - If no match is found (even if there's only one project), ask the user: list existing project names and offer to create a new one matching the local project name via the `create_project` MCP tool
+
+After successful selection, write `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json`.
 
 ### Step 2: Resolve the URL
 
@@ -95,7 +109,9 @@ The user ran `/screenote feedback`. Your job: fetch annotations and present the 
 
 ### Step 1: Pick a Project
 
-Follow the same matching logic as Capture Mode Step 1: match local project name to Screenote project names, ask user if no match.
+**Check the Project Cache first** (see Project Cache section). If the cache provides a valid project, skip to Step 2.
+
+If no cache, follow Capture Mode Step 1 exactly (including writing `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` on success).
 
 ### Step 2: Pick a Screenshot
 
