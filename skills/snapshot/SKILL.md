@@ -184,14 +184,15 @@ Some pages require login. Detect and handle this:
 5. Wait for redirect/confirmation using `browser_wait_for`
 6. Verify login succeeded by checking the resulting page
 
-**Important:** Perform login **once** before starting the screenshot loop. The browser session will maintain cookies/tokens for subsequent page visits.
+**Important:** Perform login **once**. The browser session will maintain cookies/tokens for subsequent page visits.
 
-### Route Ordering
+### Route Ordering and Login Timing
 
-Order routes so that:
-1. **Public pages first** (login, signup, landing pages)
-2. **Login step** (if authentication is needed)
-3. **Authenticated pages** (dashboard, settings, admin, etc.)
+Split the screenshot loop into two phases so public pages are captured in their unauthenticated state:
+
+1. **Phase 1 — Public pages** (login form, signup form, landing pages): screenshot these **before** logging in
+2. **Login step**: perform the login flow (if authentication is needed)
+3. **Phase 2 — Authenticated pages** (dashboard, settings, admin, etc.): screenshot these **after** logging in
 
 ---
 
