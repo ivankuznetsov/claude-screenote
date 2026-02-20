@@ -90,7 +90,7 @@ Search the local project files for route definitions. Look for common patterns d
 - Search for `RouterModule.forRoot`, `Routes` arrays
 
 **Express / Backend:**
-- Search for `app.get(`, `app.post(`, `router.get(`, `router.post(` patterns
+- Search for `app.get(`, `router.get(` patterns only — POST/PUT/DELETE endpoints are API handlers, not navigable pages
 - Look for route definition files
 
 **Django:**
@@ -108,12 +108,13 @@ Build a list of route paths (e.g., `/`, `/login`, `/dashboard`, `/settings`, `/u
 
 ### Strategy B: Runtime Discovery (supplement)
 
-After static analysis, optionally navigate to the base URL and extract links:
+After static analysis, optionally navigate to the base URL and extract links. **Set the viewport first** (see Step 5) before any browser interaction:
 
-1. Navigate to `base_url` with `browser_navigate`
-2. Use `browser_snapshot` to get the page's accessibility tree
-3. Extract all internal links (same-origin `<a href>` values)
-4. Add any new routes not found in static analysis
+1. Set viewport via `browser_resize` (desktop or mobile, per Mode Detection)
+2. Navigate to `base_url` with `browser_navigate`
+3. Use `browser_snapshot` to get the page's accessibility tree
+4. Extract all internal links (same-origin `<a href>` values)
+5. Add any new routes not found in static analysis
 
 ### Handling Dynamic Routes
 
@@ -150,9 +151,9 @@ Ask the user:
 
 ---
 
-## Step 5: Set Viewport
+## Step 5: Ensure Viewport Is Set
 
-Resize the browser **before any browser interaction** (including authentication):
+If you already set the viewport during Strategy B (runtime discovery), skip this step. Otherwise, resize the browser now — before authentication or any screenshots:
 
 - **Desktop** (default): `browser_resize` to **1440 x 900**
 - **Mobile** (when `mobile` keyword was used): `browser_resize` to **393 x 852** (iPhone 15)
