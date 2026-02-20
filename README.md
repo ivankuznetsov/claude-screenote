@@ -1,6 +1,6 @@
 # claude-screenote
 
-Give your AI coding agent eyes. Screenshot any page, annotate it in Screenote, and let Claude Code read your feedback — all without leaving the terminal.
+Give your AI coding agent eyes. Screenshot any page — or snapshot your entire app — annotate in Screenote, and let Claude Code read your feedback — all without leaving the terminal.
 
 ## Quick Start
 
@@ -32,6 +32,16 @@ You'll get a link to annotate the screenshot in Screenote. Draw on it, leave com
 ```
 
 Claude sees every annotation with its position and comment, and can start fixing things right away.
+
+### 4. Snapshot your entire app
+
+Take a visual snapshot of every page in your app at once:
+
+```
+/snapshot http://localhost:3000
+```
+
+The agent discovers all routes in your codebase, handles authentication, and screenshots each page. Every screenshot is tagged with the current date and last git commit hash.
 
 ## How It Works
 
@@ -66,6 +76,21 @@ You                       Claude Code                  Screenote
 ```
 
 Works with any URL your machine can reach — localhost, staging, production.
+
+### Snapshot the entire app
+
+```
+/snapshot http://localhost:3000
+```
+
+The snapshot workflow:
+1. **Discovers routes** — scans your codebase for route definitions (React Router, Next.js, Vue Router, Express, Django, Rails, etc.)
+2. **Handles auth** — logs in if needed so authenticated pages are captured
+3. **Screenshots every page** — navigates to each route and takes a full-page screenshot
+4. **Tags with metadata** — every screenshot title includes the date and last git commit hash (e.g., `App Snapshot — 2025-06-15 — a1b2c3d — /dashboard`)
+5. **Uploads to Screenote** — all screenshots are uploaded for review and annotation
+
+Use `mobile` for mobile viewport: `/snapshot mobile http://localhost:3000`
 
 ### Read annotations
 
