@@ -22,29 +22,9 @@ Parse the user's argument:
 
 ---
 
-## Project Cache
-
-Before calling `list_projects`, check for a cached project selection:
-
-1. Try to read `.claude/screenote-cache.json` (relative to cwd). If the file does not exist, skip to step 2. If it exists and contains valid JSON with `project_id` and `project_name`, use that project and skip the "Pick a Project" step. Print: "Using cached Screenote project: **\<name\>** (delete `.claude/screenote-cache.json` to switch)"
-2. If the file is missing or invalid, proceed with the normal "Pick a Project" step below. After successful selection, write `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` (create the `.claude/` directory if needed).
-3. If any tool call that uses the cached `project_id` returns a response containing `"error": "forbidden"` or `"error": "not_found"`, the cache is stale. Delete the cache file and re-run the "Pick a Project" step.
-
----
-
 ## Step 1: Pick a Project
 
-**Check the Project Cache first** (see Project Cache section). If the cache provides a valid project, skip to Step 2.
-
-If no cache, determine the **local project name** from the current working directory (e.g., the repo/folder name).
-
-Call the `list_projects` MCP tool to get the user's Screenote projects. Each project has an `id` and a `name`. Always refer to projects by **name** — use `id` only internally for API calls.
-
-**Matching logic:**
-- If a Screenote project name matches the local project name (case-insensitive), use it automatically
-- If no match is found (even if there's only one project), ask the user: list existing project names and offer to create a new one matching the local project name via the `create_project` MCP tool
-
-After successful selection, write `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json`.
+Follow the **Project Cache** and **Pick a Project** procedure from the `/screenote` skill (`skills/screenote/SKILL.md`). The logic is identical: check `.claude/screenote-cache.json`, match by local project name, or prompt the user. Refer to that skill for the full steps.
 
 ---
 
@@ -75,8 +55,13 @@ This label will be used as a prefix in every screenshot title.
 The user provides either a base URL or a description of the app.
 
 - If the argument looks like a full URL (starts with `http`), use it as the base URL
-- If it looks like a relative path, prepend `http://localhost:3000`
-- If it's a description or empty, default to `http://localhost:3000`
+- If it looks like a relative path, prepend the detected base URL (see below)
+- If it's a description or empty, detect the base URL from the project
+
+**Port detection:** Do not assume `localhost:3000`. Infer the port from the project's framework:
+- Check for a running dev server first (e.g., `lsof -i -P -n | grep LISTEN` or similar)
+- If nothing is running, infer from project files: `package.json` scripts (Next.js/Vite/CRA → 3000-5173), `manage.py` (Django → 8000), `config/routes.rb` (Rails → 3000), `mix.exs` (Phoenix → 4000), `go.mod` (Go → 8080)
+- If detection fails, ask the user for the base URL instead of guessing
 
 Store this as `base_url` (no trailing slash).
 
@@ -165,7 +150,16 @@ Ask the user:
 
 ---
 
-## Step 5: Handle Authentication
+## Step 5: Set Viewport
+
+Resize the browser **before any browser interaction** (including authentication):
+
+- **Desktop** (default): `browser_resize` to **1440 x 900**
+- **Mobile** (when `mobile` keyword was used): `browser_resize` to **393 x 852** (iPhone 15)
+
+---
+
+## Step 6: Handle Authentication
 
 Some pages require login. Detect and handle this:
 
@@ -175,6 +169,11 @@ Some pages require login. Detect and handle this:
   - **Form login**: Navigate to login page, fill in credentials (user provides username/password)
   - **Already logged in**: If the browser session already has auth cookies/tokens
   - **No auth needed**: All pages are public
+
+**Security note:** Credentials provided for form login will be visible in the conversation context. For sensitive environments, prefer one of these alternatives:
+- Log in manually in the browser before running `/snapshot` (the session cookies persist)
+- Set credentials via environment variables and reference them in the login flow
+- Use a test/staging account with limited permissions
 
 ### Login Flow (if needed)
 
@@ -196,16 +195,17 @@ Order routes so that:
 
 ---
 
-## Step 6: Set Viewport
-
-Resize the browser to the correct viewport:
-
-- **Desktop** (default): `browser_resize` to **1440 x 900**
-- **Mobile** (when `mobile` keyword was used): `browser_resize` to **393 x 852** (iPhone 15)
-
----
-
 ## Step 7: Screenshot Each Page
+
+### Setup
+
+Create a unique temp directory to avoid collisions with concurrent runs:
+
+```bash
+SNAP_DIR=$(mktemp -d /tmp/screenote-snapshot-XXXXXX)
+```
+
+### Capture Loop
 
 Loop through the route list and capture each page.
 
@@ -213,7 +213,7 @@ For each route:
 
 1. **Navigate**: `browser_navigate` to `<base_url><route_path>`
 2. **Wait**: Use `browser_wait_for` if the page has dynamic content (check for loading spinners, skeleton screens, etc.)
-3. **Screenshot**: `browser_take_screenshot` with `filename` set to `/tmp/screenote-snapshot-<index>.png` and `type` set to `png`
+3. **Screenshot**: `browser_take_screenshot` with `filename` set to `<SNAP_DIR>/<index>.png` and `type` set to `png`
 4. **Upload**: Call `create_screenshot_upload` MCP tool:
    ```
    Tool: create_screenshot_upload
@@ -226,19 +226,24 @@ For each route:
    - Append `(mobile)` if mobile viewport was used
 5. **Upload file**:
    ```bash
-   curl -X PUT -H 'Content-Type: image/png' --data-binary @/tmp/screenote-snapshot-<index>.png '<upload_url>'
+   curl -X PUT -H 'Content-Type: image/png' --data-binary @<SNAP_DIR>/<index>.png '<upload_url>'
    ```
-6. **Clean up**:
-   ```bash
-   rm -f /tmp/screenote-snapshot-<index>.png
-   ```
-7. **Track progress**: Print `[3/12] /dashboard — uploaded` after each successful upload
+6. **Track progress**: Print `[3/12] /dashboard — uploaded` after each successful upload
+
+### Cleanup
+
+After the loop completes (whether successful or not), remove the temp directory:
+
+```bash
+rm -rf <SNAP_DIR>
+```
 
 ### Error Handling
 
 - If a page returns a 404 or error, capture it anyway (the error state is useful for review) but note it in the summary
 - If a page requires auth and you're not logged in (redirects to login), note it and suggest the user provide credentials
 - If navigation times out, skip the page and note it in the summary
+- **If the process fails mid-batch** (API error, browser crash, network issue): report which pages were successfully uploaded versus which remain, clean up the temp directory, and offer to resume from the last failed page
 
 ---
 
