@@ -225,8 +225,7 @@ For each route:
      title: "<snapshot_label>" — e.g., "App Snapshot — 2025-06-15 — a1b2c3d"
      mime_type: "image/png"
    ```
-   - `page_name` groups all snapshots of the same route as versions of that page
-   - `title` is the snapshot label (same for all pages in one run) — it distinguishes this snapshot run from previous ones
+   `page_name` and `title` work as described in the `/screenote` skill — `page_name` is the route path, `title` is the snapshot label shared across all pages in one run.
 5. **Upload file**:
    ```bash
    curl -X PUT -H 'Content-Type: image/png' --data-binary @<SNAP_DIR>/<index>.png '<upload_url>'
@@ -252,7 +251,7 @@ rm -rf <SNAP_DIR>
 
 ## Step 8: Summary Report
 
-After all pages are captured, present a page-grouped summary:
+After all pages are captured, present a summary grouped by route:
 
 ```
 App Snapshot Complete
@@ -260,33 +259,27 @@ App Snapshot Complete
 Date: 2025-06-15
 Commit: a1b2c3d — "Fix header alignment"
 Viewport: Desktop (1440x900)
-Snapshot label: App Snapshot — 2025-06-15 — a1b2c3d
 Pages captured: 11/12
 
 Uploaded pages:
- 1. /                         — uploaded (new page)
- 2. /login                    — uploaded (new version)
- 3. /signup                   — uploaded (new page)
- 4. /dashboard                — uploaded (new version)
- 5. /dashboard/analytics      — uploaded (new page)
- 6. /settings                 — uploaded (new version)
- 7. /settings/profile         — uploaded (new page)
- 8. /settings/billing         — uploaded (new page)
- 9. /users                    — uploaded (new page)
-10. /admin                    — uploaded (new version)
-11. /admin/settings           — uploaded (new page)
+ 1. /
+ 2. /login
+ 3. /signup
+ 4. /dashboard
+ 5. /dashboard/analytics
+ 6. /settings
+ 7. /settings/profile
+ 8. /settings/billing
+ 9. /users
+10. /admin
+11. /admin/settings
 
 Skipped:
  - /users/:id (dynamic route — no sample value provided)
 
-Each route is stored as a page in Screenote. Repeated snapshots of the
-same route appear as versions, so you can compare changes over time.
-
 Open Screenote to review and annotate the snapshots.
 Run /screenote feedback when ready.
 ```
-
-Note: "new page" means this is the first snapshot for that route; "new version" means a previous snapshot already exists for that route.
 
 ---
 
