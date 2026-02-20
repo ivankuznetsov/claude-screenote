@@ -221,11 +221,12 @@ For each route:
    Tool: create_screenshot_upload
    Arguments:
      project_id: <from step 1>
-     title: "<snapshot_label> — <route_path>"
+     page_name: "<route_path>" — e.g., "/dashboard", "/settings/profile". Append " (mobile)" if mobile viewport was used.
+     title: "<snapshot_label>" — e.g., "App Snapshot — 2025-06-15 — a1b2c3d"
      mime_type: "image/png"
    ```
-   - The title format is: `App Snapshot — 2025-06-15 — a1b2c3d — /dashboard`
-   - Append `(mobile)` if mobile viewport was used
+   - `page_name` groups all snapshots of the same route as versions of that page
+   - `title` is the snapshot label (same for all pages in one run) — it distinguishes this snapshot run from previous ones
 5. **Upload file**:
    ```bash
    curl -X PUT -H 'Content-Type: image/png' --data-binary @<SNAP_DIR>/<index>.png '<upload_url>'
@@ -251,7 +252,7 @@ rm -rf <SNAP_DIR>
 
 ## Step 8: Summary Report
 
-After all pages are captured, present a summary:
+After all pages are captured, present a page-grouped summary:
 
 ```
 App Snapshot Complete
@@ -259,27 +260,33 @@ App Snapshot Complete
 Date: 2025-06-15
 Commit: a1b2c3d — "Fix header alignment"
 Viewport: Desktop (1440x900)
+Snapshot label: App Snapshot — 2025-06-15 — a1b2c3d
 Pages captured: 11/12
 
-Uploaded screenshots:
- 1. App Snapshot — 2025-06-15 — a1b2c3d — /
- 2. App Snapshot — 2025-06-15 — a1b2c3d — /login
- 3. App Snapshot — 2025-06-15 — a1b2c3d — /signup
- 4. App Snapshot — 2025-06-15 — a1b2c3d — /dashboard
- 5. App Snapshot — 2025-06-15 — a1b2c3d — /dashboard/analytics
- 6. App Snapshot — 2025-06-15 — a1b2c3d — /settings
- 7. App Snapshot — 2025-06-15 — a1b2c3d — /settings/profile
- 8. App Snapshot — 2025-06-15 — a1b2c3d — /settings/billing
- 9. App Snapshot — 2025-06-15 — a1b2c3d — /users
-10. App Snapshot — 2025-06-15 — a1b2c3d — /admin
-11. App Snapshot — 2025-06-15 — a1b2c3d — /admin/settings
+Uploaded pages:
+ 1. /                         — uploaded (new page)
+ 2. /login                    — uploaded (new version)
+ 3. /signup                   — uploaded (new page)
+ 4. /dashboard                — uploaded (new version)
+ 5. /dashboard/analytics      — uploaded (new page)
+ 6. /settings                 — uploaded (new version)
+ 7. /settings/profile         — uploaded (new page)
+ 8. /settings/billing         — uploaded (new page)
+ 9. /users                    — uploaded (new page)
+10. /admin                    — uploaded (new version)
+11. /admin/settings           — uploaded (new page)
 
 Skipped:
  - /users/:id (dynamic route — no sample value provided)
 
+Each route is stored as a page in Screenote. Repeated snapshots of the
+same route appear as versions, so you can compare changes over time.
+
 Open Screenote to review and annotate the snapshots.
 Run /screenote feedback when ready.
 ```
+
+Note: "new page" means this is the first snapshot for that route; "new version" means a previous snapshot already exists for that route.
 
 ---
 

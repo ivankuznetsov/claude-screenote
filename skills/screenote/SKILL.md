@@ -77,9 +77,12 @@ Call the `create_screenshot_upload` MCP tool to get a signed upload URL:
 Tool: create_screenshot_upload
 Arguments:
   project_id: <from step 1>
-  title: <descriptive title> — append "(mobile)" if mobile viewport was used
+  page_name: <page being captured> — the URL path or short page description (e.g., "/login", "Dashboard", "/settings/profile"). Append " (mobile)" if mobile viewport was used.
+  title: <version label> — use the current date (e.g., "2025-06-15") or a short descriptor (e.g., "v1", "after redesign")
   mime_type: "image/png"
 ```
+
+**How page_name and title work together:** `page_name` groups repeated captures of the same page — every upload with the same `page_name` appears as a version under that page. `title` distinguishes versions within the page (like a date or "v2"). If `page_name` is omitted the API defaults it to `title` (flat behavior, backward-compatible).
 
 Then upload the file directly via curl (the image bytes never enter the LLM context):
 
@@ -113,9 +116,40 @@ The user ran `/screenote feedback`. Your job: fetch annotations and present the 
 
 If no cache, follow Capture Mode Step 1 exactly (including writing `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` on success).
 
-### Step 2: Pick a Screenshot
+### Step 2: Pick a Page and Version
 
-Call `list_screenshots` for the matched project. Show the user a list of recent screenshots by **title** and let them pick one. If there's only one screenshot, use it automatically.
+Navigate the project's page hierarchy to find the screenshot the user wants feedback on.
+
+**2a. List pages:**
+
+Call `list_pages` for the project:
+
+```
+Tool: list_pages
+Arguments:
+  project_id: <project_id>
+```
+
+This returns pages, each with `id`, `name`, and `versions_count`.
+
+- If there's only **one page**, use it automatically
+- Otherwise, show pages by **name** (with version count) and let the user pick one
+
+**2b. List versions:**
+
+Call `list_screenshots` with the selected page:
+
+```
+Tool: list_screenshots
+Arguments:
+  project_id: <project_id>
+  page_id: <selected page id>
+```
+
+This returns the versions (screenshots) for that page, each with `id`, `title`, and annotation counts.
+
+- If there's only **one version**, use it automatically
+- Otherwise, show versions by **title** and let the user pick one
 
 ### Step 3: Fetch Annotations
 
