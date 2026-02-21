@@ -77,9 +77,12 @@ Call the `create_screenshot_upload` MCP tool to get a signed upload URL:
 Tool: create_screenshot_upload
 Arguments:
   project_id: <from step 1>
-  title: <descriptive title> — append "(mobile)" if mobile viewport was used
+  page_name: <URL path of the page> — e.g., "/login", "/settings/profile". Append " (mobile)" if mobile viewport was used. Always use the URL path so that captures from `/screenote` and `/snapshot` group under the same page.
+  title: <version label> — use the current date (e.g., "2025-06-15") or a short descriptor (e.g., "v1", "after redesign")
   mime_type: "image/png"
 ```
+
+**page_name vs title:** `page_name` groups uploads into a page; `title` labels each version within it. Omit `page_name` to fall back to flat (title-only) behavior.
 
 Then upload the file directly via curl (the image bytes never enter the LLM context):
 
@@ -113,9 +116,14 @@ The user ran `/screenote feedback`. Your job: fetch annotations and present the 
 
 If no cache, follow Capture Mode Step 1 exactly (including writing `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` on success).
 
-### Step 2: Pick a Screenshot
+### Step 2: Pick a Page and Version
 
-Call `list_screenshots` for the matched project. Show the user a list of recent screenshots by **title** and let them pick one. If there's only one screenshot, use it automatically.
+Navigate the project's page hierarchy to find the screenshot the user wants feedback on.
+
+1. Call `list_pages` with `project_id`. If there is only one page, use it; otherwise show pages by **name** (with version count) and let the user pick.
+2. Call `list_screenshots` with `project_id` and the selected `page_id`. If there is only one version, use it; otherwise show versions by **title** and let the user pick.
+
+**Backward compatibility:** Screenshots uploaded before the pages feature exist under a default page. `list_pages` always returns at least one page if the project has any screenshots, so this flow works for both old and new uploads.
 
 ### Step 3: Fetch Annotations
 

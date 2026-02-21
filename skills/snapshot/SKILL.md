@@ -221,11 +221,11 @@ For each route:
    Tool: create_screenshot_upload
    Arguments:
      project_id: <from step 1>
-     title: "<snapshot_label> — <route_path>"
+     page_name: "<route_path>" — e.g., "/dashboard", "/settings/profile". Append " (mobile)" if mobile viewport was used.
+     title: "<snapshot_label>" — e.g., "App Snapshot — 2025-06-15 — a1b2c3d"
      mime_type: "image/png"
    ```
-   - The title format is: `App Snapshot — 2025-06-15 — a1b2c3d — /dashboard`
-   - Append `(mobile)` if mobile viewport was used
+   `page_name` and `title` work as described in the `/screenote` skill — `page_name` is the route path, `title` is the snapshot label shared across all pages in one run.
 5. **Upload file**:
    ```bash
    curl -X PUT -H 'Content-Type: image/png' --data-binary @<SNAP_DIR>/<index>.png '<upload_url>'
@@ -251,7 +251,7 @@ rm -rf <SNAP_DIR>
 
 ## Step 8: Summary Report
 
-After all pages are captured, present a summary:
+After all pages are captured, present a summary grouped by route:
 
 ```
 App Snapshot Complete
@@ -261,18 +261,18 @@ Commit: a1b2c3d — "Fix header alignment"
 Viewport: Desktop (1440x900)
 Pages captured: 11/12
 
-Uploaded screenshots:
- 1. App Snapshot — 2025-06-15 — a1b2c3d — /
- 2. App Snapshot — 2025-06-15 — a1b2c3d — /login
- 3. App Snapshot — 2025-06-15 — a1b2c3d — /signup
- 4. App Snapshot — 2025-06-15 — a1b2c3d — /dashboard
- 5. App Snapshot — 2025-06-15 — a1b2c3d — /dashboard/analytics
- 6. App Snapshot — 2025-06-15 — a1b2c3d — /settings
- 7. App Snapshot — 2025-06-15 — a1b2c3d — /settings/profile
- 8. App Snapshot — 2025-06-15 — a1b2c3d — /settings/billing
- 9. App Snapshot — 2025-06-15 — a1b2c3d — /users
-10. App Snapshot — 2025-06-15 — a1b2c3d — /admin
-11. App Snapshot — 2025-06-15 — a1b2c3d — /admin/settings
+Uploaded pages:
+ 1. /
+ 2. /login
+ 3. /signup
+ 4. /dashboard
+ 5. /dashboard/analytics
+ 6. /settings
+ 7. /settings/profile
+ 8. /settings/billing
+ 9. /users
+10. /admin
+11. /admin/settings
 
 Skipped:
  - /users/:id (dynamic route — no sample value provided)
