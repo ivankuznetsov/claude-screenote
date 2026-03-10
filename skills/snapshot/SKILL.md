@@ -259,6 +259,7 @@ App Snapshot Complete
 Date: 2025-06-15
 Commit: a1b2c3d — "Fix header alignment"
 Viewport: Desktop (1440x900)
+Project: <project_name>
 Pages captured: 11/12
 
 Uploaded pages:
@@ -278,7 +279,7 @@ Skipped:
  - /users/:id (dynamic route — no sample value provided)
 
 Open Screenote to review and annotate the snapshots.
-Run /screenote feedback when ready.
+Run /feedback when ready.
 ```
 
 ---

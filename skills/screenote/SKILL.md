@@ -2,7 +2,7 @@
 name: screenote
 description: Capture a page screenshot, upload to Screenote for human annotation, and retrieve feedback
 user_invocable: true
-argument: "[mobile] [url-or-description] or 'feedback'"
+argument: "[mobile] [url-or-description]"
 ---
 
 # Screenote — Visual Feedback Loop
@@ -15,7 +15,7 @@ Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.jso
 
 Parse the user's argument:
 
-- If the argument starts with `feedback` → go to **Feedback Mode**
+- If the argument starts with `feedback` → tell the user: "Feedback has moved to its own command. Run `/feedback` (or `/claude-screenote:feedback`) instead." Stop.
 - If the argument starts with `mobile` → go to **Capture Mode** with **mobile viewport** (strip `mobile` from the argument, the rest is the URL/description)
 - Otherwise → go to **Capture Mode** with **desktop viewport**
 
@@ -23,11 +23,12 @@ Parse the user's argument:
 
 ## Project Cache
 
-Before calling `list_projects`, check for a cached project selection:
+Call `list_projects` to verify the MCP connection and get the current project list. If the call fails with an auth error, tell the user to authorize the Screenote MCP server and stop.
 
-1. Try to read `.claude/screenote-cache.json` (relative to cwd). If the file does not exist, skip to step 2. If it exists and contains valid JSON with `project_id` and `project_name`, use that project and skip the "Pick a Project" step. Print: "Using cached Screenote project: **\<name\>** (delete `.claude/screenote-cache.json` to switch)"
-2. If the file is missing or invalid, proceed with the normal "Pick a Project" step below. After successful selection, write `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` (create the `.claude/` directory if needed).
-3. If any tool call that uses the cached `project_id` returns a response containing `"error": "forbidden"` or `"error": "not_found"`, the cache is stale. Delete the cache file and re-run the "Pick a Project" step.
+Then check for a cached project selection:
+
+1. Try to read `.claude/screenote-cache.json` (relative to cwd). If it exists and contains valid JSON with `project_id` and `project_name`, AND that `project_id` appears in the `list_projects` response, use that project and skip the "Pick a Project" step. Do not announce the cached selection.
+2. If the file is missing, invalid, or the `project_id` is not in the `list_projects` response (stale cache), delete the cache file if it exists and proceed with the normal "Pick a Project" step below. After successful selection, write `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` (create the `.claude/` directory if needed).
 
 ---
 
@@ -37,11 +38,9 @@ The user provided a URL or page description. Your job: screenshot it, upload to 
 
 ### Step 1: Pick a Project
 
-**Check the Project Cache first** (see Project Cache section). If the cache provides a valid project, skip to Step 2.
+**Check the Project Cache first** (see Project Cache section above). The `list_projects` call has already been made there. If the cache provides a valid project, skip to Step 2.
 
-If no cache, determine the **local project name** from the current working directory (e.g., the repo/folder name).
-
-Call the `list_projects` MCP tool to get the user's Screenote projects. Each project has an `id` and a `name`. Always refer to projects by **name** — use `id` only internally for API calls.
+If no cache hit, determine the **local project name** from the current working directory (e.g., the repo/folder name). Use the project list already fetched in the Project Cache step. Always refer to projects by **name** — use `id` only internally for API calls.
 
 **Matching logic:**
 - If a Screenote project name matches the local project name (case-insensitive), use it automatically
@@ -96,82 +95,11 @@ The MCP tool response includes `screenshot_id`, `upload_url`, and `annotate_url`
 
 Tell the user:
 - The screenshot was uploaded successfully
-- Provide the **annotate URL** so they can open it in the browser and add annotations
-- Tell them to run `/screenote feedback` when they're done annotating
+- Say "Uploaded to **<project_name>**" and provide the **annotate URL** so they can open it in the browser and add annotations
+- Tell them to run `/feedback` when they're done annotating
 
 Clean up the temp file:
 ```bash
 rm -f /tmp/screenote-capture.png
 ```
 
----
-
-## Feedback Mode
-
-The user ran `/screenote feedback`. Your job: fetch annotations and present the feedback.
-
-### Step 1: Pick a Project
-
-**Check the Project Cache first** (see Project Cache section). If the cache provides a valid project, skip to Step 2.
-
-If no cache, follow Capture Mode Step 1 exactly (including writing `{ "project_id": <id>, "project_name": "<name>" }` to `.claude/screenote-cache.json` on success).
-
-### Step 2: Pick a Page and Version
-
-Navigate the project's page hierarchy to find the screenshot the user wants feedback on.
-
-1. Call `list_pages` with `project_id`. If there is only one page, use it; otherwise show pages by **name** (with version count) and let the user pick.
-2. Call `list_screenshots` with `project_id` and the selected `page_id`. If there is only one version, use it; otherwise show versions by **title** and let the user pick.
-
-**Backward compatibility:** Screenshots uploaded before the pages feature exist under a default page. `list_pages` always returns at least one page if the project has any screenshots, so this flow works for both old and new uploads.
-
-### Step 3: Fetch Annotations
-
-Call the `list_annotations` MCP tool:
-
-```
-Tool: list_annotations
-Arguments:
-  project_id: <project_id>
-  screenshot_id: <screenshot_id>
-  status: "open"
-```
-
-### Step 4: Get Visual Context
-
-For each annotation, call `get_annotation` to retrieve the cropped image of the annotated region:
-
-```
-Tool: get_annotation
-Arguments:
-  project_id: <project_id>
-  annotation_id: <annotation_id>
-```
-
-This returns the annotation details plus a base64-encoded cropped image of the exact region the user marked.
-
-### Step 5: Present Feedback
-
-For each annotation, present it clearly with the visual context:
-
-```
-## Annotation #1 (point at 50%, 30%)
-**Author:** designer@example.com
-**Comment:** This button color is wrong
-[cropped image shown]
-```
-
-For region annotations, include the dimensions:
-```
-## Annotation #2 (region at 10%, 20% — 30% x 15%)
-**Author:** designer@example.com
-**Comment:** This entire section needs more padding
-[cropped image shown]
-```
-
-### Step 6: Offer Next Steps
-
-After presenting all annotations, ask the user if they'd like you to:
-- Address a specific annotation (and mark it resolved via `resolve_annotation` when done)
-- Address all annotations one by one
-- Take a new screenshot after making fixes (`/screenote <url>`)
