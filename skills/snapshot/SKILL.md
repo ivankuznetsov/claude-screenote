@@ -24,7 +24,7 @@ Parse the user's argument:
 
 ## Step 1: Pick a Project
 
-Follow the **Project Cache** and **Pick a Project** procedure from the `/screenote` skill (`skills/screenote/SKILL.md`). The logic is identical: check `.claude/screenote-cache.json`, match by local project name, or prompt the user. Refer to that skill for the full steps.
+Follow the **Project Cache** and **Pick a Project** procedure from the `/screenote` skill (`skills/screenote/SKILL.md`). The logic is identical: call `list_projects` first (auth gate), then check `.claude/screenote-cache.json`, match by local project name, or prompt the user.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: screenote
-description: Capture a page screenshot, upload to Screenote for human annotation, and retrieve feedback
+description: Capture a page screenshot and upload to Screenote for human annotation
 user_invocable: true
 argument: "[mobile] [url-or-description]"
 ---

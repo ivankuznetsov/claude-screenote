@@ -50,22 +50,6 @@ For each annotation, show:
 - Comment text
 - Cropped image
 
-For region annotations, include the dimensions:
-```
-## Annotation #1 (region at 10%, 20% — 30% x 15%)
-**Author:** designer@example.com
-**Comment:** This entire section needs more padding
-[cropped image shown]
-```
-
-For point annotations:
-```
-## Annotation #2 (point at 50%, 30%)
-**Author:** designer@example.com
-**Comment:** This button color is wrong
-[cropped image shown]
-```
-
 ## Step 6: Offer Next Steps
 
 After presenting all annotations, ask the user if they'd like to:
