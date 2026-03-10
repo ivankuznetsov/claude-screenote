@@ -20,14 +20,17 @@ If `list_projects` returned zero projects → say:
 
 ## Step 2: Pick a Page and Version
 
+If the user provided an argument, use it as a case-insensitive selection hint when matching page names and version titles below. Auto-select only when there is exactly one clear match; otherwise fall back to interactive picking.
+
 Call `list_pages` with project_id.
 - Zero pages → "No screenshots in this project yet. Use `/screenote <url>` to capture a page first." Stop.
 - One page → use it automatically
-- Multiple pages → show pages by name (with version count), let user pick
+- Multiple pages → if the argument uniquely matches one page name, use it; otherwise show pages by name (with version count), let user pick
 
 Call `list_screenshots` with project_id and page_id.
+- Zero versions → "No screenshot versions found for this page yet. Capture one with `/screenote <url>` first." Stop.
 - One version → use it
-- Multiple → show by title, let user pick
+- Multiple → if the argument uniquely matches one version title, use it; otherwise show by title, let user pick
 
 ## Step 3: Fetch Annotations
 
