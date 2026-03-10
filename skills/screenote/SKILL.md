@@ -7,7 +7,7 @@ argument: "[mobile] [url-or-description]"
 
 # Screenote — Visual Feedback Loop
 
-You are executing the Screenote skill. This connects Claude Code to Screenote for visual feedback: screenshot a page, upload it for human annotation, then retrieve the feedback.
+You are executing the Screenote skill. This connects Claude Code to Screenote for visual feedback: screenshot a page and upload it for human annotation.
 
 Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.json` configures the MCP server connection. No API key needed.
 
