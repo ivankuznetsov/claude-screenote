@@ -22,13 +22,7 @@ Parse the user's argument:
 
 ## Viewport Dimensions
 
-Fixed defaults (match Screenote server's canonical set):
-
-| Viewport | Dimensions | Notes |
-|---|---|---|
-| `desktop` | **1280 × 800** | Playwright's default desktop |
-| `tablet`  | **768 × 1024** | iPad mini |
-| `mobile`  | **390 × 844** | iPhone 14 |
+Use the canonical Viewport Dimensions table from the `/screenote` skill (`skills/screenote/SKILL.md` § Viewport Dimensions). Single source of truth — do not restate the pixel values here.
 
 ---
 
@@ -118,9 +112,9 @@ Build a list of route paths (e.g., `/`, `/login`, `/dashboard`, `/settings`, `/u
 
 ### Strategy B: Runtime Discovery (supplement)
 
-After static analysis, optionally navigate to the base URL and extract links. **Set the viewport first** (see Step 5) before any browser interaction:
+After static analysis, optionally navigate to the base URL and extract links.
 
-1. Set viewport via `browser_resize` (desktop or mobile, per Mode Detection)
+1. Resize the browser to **desktop** (see `/screenote` Viewport Dimensions) before any browser interaction. Discovery must run at desktop width regardless of Mode Detection — at mobile width, responsive apps commonly collapse the primary nav into a hamburger menu, which hides links from the accessibility tree and causes routes to be silently omitted from the snapshot.
 2. Navigate to `base_url` with `browser_navigate`
 3. Use `browser_snapshot` to get the page's accessibility tree
 4. Extract all internal links (same-origin `<a href>` values)
@@ -170,13 +164,21 @@ Based on Mode Detection:
 
 Store this as `viewports_to_capture` for the capture loop.
 
-For Strategy B (runtime discovery) and authentication steps, resize the browser to **desktop (1280 × 800)** — those steps don't need per-viewport captures.
+Strategy B (runtime discovery) and the authentication flow both run at desktop width — see Step 4 Strategy B and Step 6 below. Per-viewport captures happen only in Step 7.
 
 ---
 
 ## Step 6: Handle Authentication
 
-Some pages require login. Detect and handle this:
+Some pages require login. Detect and handle this.
+
+**Security note — read before asking the user for credentials:** Anything the user types in response to "how should I log in?" will be visible in the conversation context (and any transcripts/exports derived from it). Before asking, recommend these safer paths in order:
+
+1. **Pre-authenticated browser session** (preferred): ask the user to log in manually in the Playwright browser before running `/snapshot` — the session cookies persist and no credentials enter the transcript.
+2. **Environment variables**: have the user put the credentials in env vars and reference them in the login flow without echoing the values.
+3. **Test/staging account with limited permissions**: only if no other option exists.
+
+Only if the user explicitly opts into form login with typed credentials should you proceed with the Detection flow below.
 
 ### Detection
 - Ask the user: "Does this app require authentication? If so, how should I log in?"
@@ -184,11 +186,6 @@ Some pages require login. Detect and handle this:
   - **Form login**: Navigate to login page, fill in credentials (user provides username/password)
   - **Already logged in**: If the browser session already has auth cookies/tokens
   - **No auth needed**: All pages are public
-
-**Security note:** Credentials provided for form login will be visible in the conversation context. For sensitive environments, prefer one of these alternatives:
-- Log in manually in the browser before running `/snapshot` (the session cookies persist)
-- Set credentials via environment variables and reference them in the login flow
-- Use a test/staging account with limited permissions
 
 ### Login Flow (if needed)
 
@@ -213,17 +210,9 @@ Split the screenshot loop into two phases so public pages are captured in their 
 
 ## Step 7: Screenshot Each Page
 
-### Setup
+Loop through the route list. For each route, perform the canonical capture-and-upload procedure from `/screenote` Step 4 (`skills/screenote/SKILL.md` § Step 4: Capture and Upload Each Viewport). That section covers response validation, the per-invocation temp dir, serial capture, safe curl invocation, token-expiry retry, and cleanup — do not re-implement any of those details here.
 
-Create a unique temp directory to avoid collisions with concurrent runs:
-
-```bash
-SNAP_DIR=$(mktemp -d /tmp/screenote-snapshot-XXXXXX)
-```
-
-### Capture Loop
-
-Loop through the route list. For each route, capture it at every viewport in `viewports_to_capture`.
+This skill adds the **per-route orchestration** on top:
 
 For each route (index `i`, path `<route_path>`):
 
@@ -234,37 +223,21 @@ For each route (index `i`, path `<route_path>`):
      project_id: <from step 1>
      page_name: "<route_path>"
      title: "<snapshot_label>"  # e.g., "App Snapshot — 2025-06-15 — a1b2c3d"
-     viewports:
-       - { viewport: "desktop", mime_type: "image/png" }   # include only entries from viewports_to_capture
-       - { viewport: "tablet",  mime_type: "image/png" }
-       - { viewport: "mobile",  mime_type: "image/png" }
+     viewports: <viewports_to_capture as { viewport, mime_type: "image/png" } entries>
    ```
-   Response returns `screenshot_id`, `annotate_url`, and an `uploads` array with `{ viewport, upload_url, token }` per viewport.
 
-2. **Capture + upload each viewport in the response** (serial — Playwright MCP shares one browser context):
-   - `browser_resize` to the viewport's dimensions (see Viewport Dimensions table)
-   - `browser_navigate` to `<base_url><route_path>` (fresh navigate per viewport; safer for SPAs that read viewport at mount time)
-   - `browser_wait_for` if the page has dynamic content
-   - `browser_take_screenshot` with `filename` set to `<SNAP_DIR>/<i>-<viewport>.png` and `type` set to `png`
-   - `curl -X PUT -H 'Content-Type: image/png' --data-binary @<SNAP_DIR>/<i>-<viewport>.png '<upload_url>'`
+2. **Run the `/screenote` Step 4 capture-and-upload procedure** against the returned `uploads` array. Use route-scoped filenames inside the mktemp dir (e.g. `$SCREENOTE_DIR/<i>-<viewport>.png`) so concurrent routes don't clobber each other if future versions parallelize.
 
-3. **Track progress**: Print `[3/12] /dashboard — desktop, tablet, mobile uploaded` after each route completes.
+3. **Track progress**: after each route completes, print a line like `[3/12] /dashboard — desktop, tablet, mobile uploaded`.
 
-Note the increased time: multi-viewport mode is ~3× slower than single-viewport. For a 20-route app at ~3s/viewport that's roughly 3 minutes — keep the user informed.
-
-### Cleanup
-
-After the loop completes (whether successful or not), remove the temp directory:
-
-```bash
-rm -rf <SNAP_DIR>
-```
+Capture is serial — Playwright MCP shares one browser context.
 
 ### Error Handling
 
 - If a page returns a 404 or error, capture it anyway (the error state is useful for review) but note it in the summary
 - If a page requires auth and you're not logged in (redirects to login), note it and suggest the user provide credentials
 - If navigation times out, skip the page and note it in the summary
+- Token-expiry retries are already handled inside the `/screenote` Step 4 procedure — skipped viewports surface back here and should be recorded per-route in the summary
 - **If the process fails mid-batch** (API error, browser crash, network issue): report which pages were successfully uploaded versus which remain, clean up the temp directory, and offer to resume from the last failed page
 
 ---
