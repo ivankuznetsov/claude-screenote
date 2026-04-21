@@ -102,25 +102,64 @@ The response returns:
 }
 ```
 
-**Important:** capture screenshots *after* requesting upload URLs so tokens don't expire mid-capture (they live for 5 minutes).
+Only `screenshot_id` and `annotate_url` are used downstream; `page_id` is returned for debugging. Drive the capture loop from `uploads[i].viewport` — that field is authoritative for mapping bytes to viewport.
+
+Capture screenshots *after* requesting upload URLs so tokens don't expire mid-capture.
 
 ### Step 4: Capture and Upload Each Viewport
 
-For each entry in the `uploads` array, in order:
+This section is the canonical capture-and-upload procedure. `/snapshot` references it per-route.
 
-1. **Resize** the browser: `browser_resize` to the dimensions from the Viewport Dimensions table above
-2. **Navigate**: `browser_navigate` to the URL (fresh navigate per viewport — safer for SPAs than resize-only since many frameworks read viewport at mount time)
-3. **Wait**: `browser_wait_for` for dynamic content (loading spinners, skeleton screens) to settle
-4. **Screenshot**: `browser_take_screenshot` with `filename` set to `/tmp/screenote-{viewport}.png` and `type` set to `png`
-5. **Upload**: use curl to PUT the binary to the signed `upload_url` — the image bytes never enter the LLM context:
+#### 4a. Validate the response before shelling out
+
+Before any `curl`, reject a response that could smuggle shell metacharacters through the instructions below:
+
+1. Parse the `SCREENOTE_URL` env var (or default `https://screenote.ai`) from `.mcp.json` to get the **expected host** (e.g., `screenote.ai`, or `localhost:3005` in dev).
+2. For each entry in `uploads`, assert:
+   - `upload_url` starts with `https://` (or `http://` if the expected host is `localhost`) and parses as a URL whose host equals the expected host. Otherwise abort with an error.
+   - `viewport` is exactly one of `desktop`, `tablet`, `mobile`. Otherwise abort.
+
+Never interpolate server-returned strings directly into shell commands — always go through a shell variable (see 4c).
+
+#### 4b. Set up a per-invocation temp dir
 
 ```bash
-curl -X PUT -H 'Content-Type: image/png' --data-binary @/tmp/screenote-{viewport}.png '<upload_url>'
+SCREENOTE_DIR=$(mktemp -d /tmp/screenote-XXXXXX)
 ```
 
-6. **Track progress**: print `[desktop] uploaded`, `[tablet] uploaded`, `[mobile] uploaded`
+Fixed `/tmp/...` paths would collide with concurrent `/screenote` runs and are a symlink-attack target on shared machines; `mktemp -d` avoids both.
 
-Do NOT parallelize captures — Playwright MCP shares a single browser context. Serial capture is ~3× slower than single-viewport but reliable.
+#### 4c. Capture and upload each viewport, serially
+
+Playwright MCP shares a single browser context, so do **not** parallelize. For each `entry` in `uploads`, in order:
+
+1. **Resize** via `browser_resize` to the dimensions from the Viewport Dimensions table above, keyed on `entry.viewport`.
+2. **Navigate** via `browser_navigate` to the URL. Fresh navigate per viewport — safer for SPAs that read viewport at mount time than a resize-only flow.
+3. **Wait** via `browser_wait_for` for dynamic content (loading spinners, skeleton screens) to settle.
+4. **Screenshot** via `browser_take_screenshot` with `filename` = `$SCREENOTE_DIR/<viewport>.png` and `type` = `png`.
+5. **Upload** via curl using a shell variable for the URL — do not interpolate the value inline:
+   ```bash
+   UPLOAD_URL='<validated upload_url from 4a>'
+   curl -fsS -X PUT -H 'Content-Type: image/png' \
+     --data-binary @"$SCREENOTE_DIR/<viewport>.png" \
+     "$UPLOAD_URL"
+   ```
+   `-f` turns 4xx into a non-zero exit so the retry path (4d) can trigger.
+6. **Track progress**: print `[<viewport>] uploaded`.
+
+#### 4d. Token-expiry retry
+
+If any `curl` exits non-zero with a 4xx status (token expired or rejected), call `create_multi_viewport_screenshot` **once** again for this same `(project_id, page_name, title)` to get fresh upload URLs, re-validate them (4a), and retry the remaining viewports from the start of the failed one. On a second failure, record the viewport as failed and continue with the next one; include failures in the Step 5 summary.
+
+Note: re-calling `create_multi_viewport_screenshot` with the same `page_name`/`title` will create a new Screenshot grouped under the same Page. Acceptable for single-page retry; for batch runs (`/snapshot`), callers should decide whether to retry per-route or skip.
+
+#### 4e. Clean up
+
+```bash
+rm -rf "$SCREENOTE_DIR"
+```
+
+Run cleanup whether capture succeeded or failed.
 
 ### Step 5: Report to User
 
@@ -129,9 +168,4 @@ Tell the user:
 - Say "Uploaded to **<project_name>**" and provide the **annotate_url** so they can open it in the browser and add annotations
 - Mention they can switch between viewports in Screenote using the device-icon toolbar
 - Tell them to run `/feedback` when they're done annotating
-
-Clean up the temp files:
-
-```bash
-rm -f /tmp/screenote-desktop.png /tmp/screenote-tablet.png /tmp/screenote-mobile.png
-```
+- If any viewport failed after retry, list it explicitly
