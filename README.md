@@ -28,7 +28,7 @@ Tell Claude Code to screenshot a page:
 You'll get a link to annotate the screenshot in Screenote. Draw on it, leave comments, then pull the feedback back:
 
 ```
-/screenote feedback
+/feedback
 ```
 
 Claude sees every annotation with its position and comment, and can start fixing things right away.
@@ -57,7 +57,7 @@ You                       Claude Code                  Screenote
  │                            │                            │
  │  "ok read my feedback"     │                            │
  │ ──────────────────────────►│                            │
- │                            │── /screenote feedback ────►│
+ │                            │── /feedback ──────────────►│
  │                            │◄── annotations + regions ──│
  │                            │                            │
  │                            │  (fixes code based on      │
@@ -100,17 +100,30 @@ The snapshot workflow:
 4. **Tags with metadata** — every screenshot title includes the date and last git commit hash (e.g., `App Snapshot — 2025-06-15 — a1b2c3d — /dashboard`)
 5. **Uploads to Screenote** — all viewports are uploaded; reviewers flip between them per page
 
-Use `desktop`, `tablet`, or `mobile` for single-viewport: `/snapshot mobile http://localhost:3000`
+For a single viewport, prefix the argument:
+
+```
+/snapshot desktop http://localhost:3000
+/snapshot tablet  http://localhost:3000
+/snapshot mobile  http://localhost:3000
+```
 
 ### Read annotations
 
 After you've annotated the screenshot in Screenote:
 
 ```
-/screenote feedback
+/feedback
 ```
 
 Claude matches your local project name to a Screenote project, lists recent screenshots by title, and lets you pick one. Each annotation is presented with its position and comment, then Claude offers to fix the issues.
+
+Filter by viewport by prefixing the argument:
+
+```
+/feedback desktop
+/feedback mobile login
+```
 
 ### Natural language
 
