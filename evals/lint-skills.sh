@@ -46,32 +46,42 @@ for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
   done
 done
 
-# Validate viewport values are consistent across skills
-DESKTOP_W="1440"
-DESKTOP_H="900"
-MOBILE_W="393"
-MOBILE_H="852"
+# Validate the canonical viewport table lives in screenote and contains every
+# expected dimension. snapshot cross-references screenote for the table (see
+# cross-reference check above), so we don't duplicate the assertion.
+CANONICAL="$SKILLS_DIR/screenote/SKILL.md"
+for val in "1280" "800" "768" "1024" "390" "844"; do
+  if grep -q "$val" "$CANONICAL"; then
+    pass "screenote contains viewport value $val"
+  else
+    fail "screenote missing viewport value $val"
+  fi
+done
 
-for skill_file in "$SKILLS_DIR"/screenote/SKILL.md "$SKILLS_DIR"/snapshot/SKILL.md; do
-  skill_name=$(basename "$(dirname "$skill_file")")
-  for val in "$DESKTOP_W" "$DESKTOP_H" "$MOBILE_W" "$MOBILE_H"; do
-    if grep -q "$val" "$skill_file"; then
-      pass "$skill_name contains viewport value $val"
+# Validate MCP tool names are present in every skill that should reference them.
+# Shape mirrors the FEEDBACK_TOOLS loop below: missing tool is a hard fail.
+declare -A MCP_TOOL_SKILLS=(
+  [list_projects]="screenote snapshot feedback"
+  [create_project]="screenote"
+  [create_multi_viewport_screenshot]="screenote snapshot"
+)
+for tool in "${!MCP_TOOL_SKILLS[@]}"; do
+  for skill in ${MCP_TOOL_SKILLS[$tool]}; do
+    skill_file="$SKILLS_DIR/$skill/SKILL.md"
+    if grep -q "$tool" "$skill_file"; then
+      pass "$skill references MCP tool '$tool'"
     else
-      fail "$skill_name missing viewport value $val"
+      fail "$skill missing expected MCP tool '$tool'"
     fi
   done
 done
 
-# Validate MCP tool names are consistent across skills
-MCP_TOOLS="list_projects create_project create_screenshot_upload"
-for tool in $MCP_TOOLS; do
-  for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
-    skill_name=$(basename "$(dirname "$skill_file")")
-    if grep -q "$tool" "$skill_file"; then
-      pass "$skill_name references MCP tool '$tool'"
-    fi
-  done
+# Guard against references to the retired create_screenshot_upload tool.
+for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
+  skill_name=$(basename "$(dirname "$skill_file")")
+  if grep -q "create_screenshot_upload" "$skill_file"; then
+    fail "$skill_name still references retired tool 'create_screenshot_upload'"
+  fi
 done
 
 # Check feedback-specific MCP tools
