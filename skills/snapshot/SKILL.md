@@ -1,13 +1,13 @@
 ---
 name: snapshot
-description: Take a full app snapshot — discover all routes, screenshot every page (including authenticated ones), and upload to Screenote with date and commit metadata
+description: Take a full app snapshot — discover all routes, screenshot every page at desktop/tablet/mobile viewports, and upload to Screenote with date and commit metadata
 user_invocable: true
-argument: "[mobile] [base-url or description]"
+argument: "[desktop|tablet|mobile] [base-url or description]"
 ---
 
 # Snapshot — Full App Visual Snapshot
 
-You are executing the Snapshot skill. This captures a complete visual snapshot of an application: discover all routes, screenshot every page (including ones behind authentication), and upload them to Screenote as a batch. Each screenshot is tagged with the current date and the last git commit hash.
+You are executing the Snapshot skill. This captures a complete visual snapshot of an application: discover all routes, screenshot every page at three viewports (desktop, tablet, mobile) by default, and upload them to Screenote as a batch. Each screenshot is tagged with the current date and the last git commit hash.
 
 This is separate from the single-page `/screenote` command. Use `/snapshot` when you need a full picture of the entire app.
 
@@ -17,8 +17,18 @@ Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.jso
 
 Parse the user's argument:
 
-- If the argument starts with `mobile` → use **mobile viewport** (strip `mobile` from the argument, the rest is the base URL/description)
-- Otherwise → use **desktop viewport**
+- If the argument starts with `desktop`, `tablet`, or `mobile` → **single-viewport mode**: capture only that viewport (strip the keyword from the argument; the rest is the base URL/description).
+- Otherwise → **multi-viewport mode (default)**: capture all three viewports per route.
+
+## Viewport Dimensions
+
+Fixed defaults (match Screenote server's canonical set):
+
+| Viewport | Dimensions | Notes |
+|---|---|---|
+| `desktop` | **1280 × 800** | Playwright's default desktop |
+| `tablet`  | **768 × 1024** | iPad mini |
+| `mobile`  | **390 × 844** | iPhone 14 |
 
 ---
 
@@ -151,12 +161,16 @@ Ask the user:
 
 ---
 
-## Step 5: Ensure Viewport Is Set
+## Step 5: Decide Which Viewports to Capture
 
-If you already set the viewport during Strategy B (runtime discovery), skip this step. Otherwise, resize the browser now — before authentication or any screenshots:
+Based on Mode Detection:
 
-- **Desktop** (default): `browser_resize` to **1440 x 900**
-- **Mobile** (when `mobile` keyword was used): `browser_resize` to **393 x 852** (iPhone 15)
+- **Multi-viewport mode (default)**: `[desktop, tablet, mobile]` — three captures per route
+- **Single-viewport mode**: one of `[desktop]`, `[tablet]`, `[mobile]`
+
+Store this as `viewports_to_capture` for the capture loop.
+
+For Strategy B (runtime discovery) and authentication steps, resize the browser to **desktop (1280 × 800)** — those steps don't need per-viewport captures.
 
 ---
 
@@ -209,28 +223,34 @@ SNAP_DIR=$(mktemp -d /tmp/screenote-snapshot-XXXXXX)
 
 ### Capture Loop
 
-Loop through the route list and capture each page.
+Loop through the route list. For each route, capture it at every viewport in `viewports_to_capture`.
 
-For each route:
+For each route (index `i`, path `<route_path>`):
 
-1. **Navigate**: `browser_navigate` to `<base_url><route_path>`
-2. **Wait**: Use `browser_wait_for` if the page has dynamic content (check for loading spinners, skeleton screens, etc.)
-3. **Screenshot**: `browser_take_screenshot` with `filename` set to `<SNAP_DIR>/<index>.png` and `type` set to `png`
-4. **Upload**: Call `create_screenshot_upload` MCP tool:
+1. **Request upload URLs** — one call per route, all viewports in one shot:
    ```
-   Tool: create_screenshot_upload
+   Tool: create_multi_viewport_screenshot
    Arguments:
      project_id: <from step 1>
-     page_name: "<route_path>" — e.g., "/dashboard", "/settings/profile". Append " (mobile)" if mobile viewport was used.
-     title: "<snapshot_label>" — e.g., "App Snapshot — 2025-06-15 — a1b2c3d"
-     mime_type: "image/png"
+     page_name: "<route_path>"
+     title: "<snapshot_label>"  # e.g., "App Snapshot — 2025-06-15 — a1b2c3d"
+     viewports:
+       - { viewport: "desktop", mime_type: "image/png" }   # include only entries from viewports_to_capture
+       - { viewport: "tablet",  mime_type: "image/png" }
+       - { viewport: "mobile",  mime_type: "image/png" }
    ```
-   `page_name` and `title` work as described in the `/screenote` skill — `page_name` is the route path, `title` is the snapshot label shared across all pages in one run.
-5. **Upload file**:
-   ```bash
-   curl -X PUT -H 'Content-Type: image/png' --data-binary @<SNAP_DIR>/<index>.png '<upload_url>'
-   ```
-6. **Track progress**: Print `[3/12] /dashboard — uploaded` after each successful upload
+   Response returns `screenshot_id`, `annotate_url`, and an `uploads` array with `{ viewport, upload_url, token }` per viewport.
+
+2. **Capture + upload each viewport in the response** (serial — Playwright MCP shares one browser context):
+   - `browser_resize` to the viewport's dimensions (see Viewport Dimensions table)
+   - `browser_navigate` to `<base_url><route_path>` (fresh navigate per viewport; safer for SPAs that read viewport at mount time)
+   - `browser_wait_for` if the page has dynamic content
+   - `browser_take_screenshot` with `filename` set to `<SNAP_DIR>/<i>-<viewport>.png` and `type` set to `png`
+   - `curl -X PUT -H 'Content-Type: image/png' --data-binary @<SNAP_DIR>/<i>-<viewport>.png '<upload_url>'`
+
+3. **Track progress**: Print `[3/12] /dashboard — desktop, tablet, mobile uploaded` after each route completes.
+
+Note the increased time: multi-viewport mode is ~3× slower than single-viewport. For a 20-route app at ~3s/viewport that's roughly 3 minutes — keep the user informed.
 
 ### Cleanup
 
@@ -258,9 +278,9 @@ App Snapshot Complete
 
 Date: 2025-06-15
 Commit: a1b2c3d — "Fix header alignment"
-Viewport: Desktop (1440x900)
+Viewports: Desktop + Tablet + Mobile (or "Desktop only" / "Mobile only" / etc.)
 Project: <project_name>
-Pages captured: 11/12
+Pages captured: 11/12 × 3 viewports = 33 screenshots
 
 Uploaded pages:
  1. /

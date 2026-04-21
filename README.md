@@ -75,7 +75,17 @@ You                       Claude Code                  Screenote
 /screenote https://myapp.com/dashboard
 ```
 
+Captures **three viewports by default** — desktop (1280×800), tablet (768×1024), and mobile (390×844) — and uploads them as one Screenshot. In Screenote, device icons let the reviewer switch between variants and annotate each layout independently.
+
 Works with any URL your machine can reach — localhost, staging, production.
+
+For a single viewport instead, prefix the argument:
+
+```
+/screenote desktop https://myapp.com/dashboard
+/screenote tablet  https://myapp.com/dashboard
+/screenote mobile  https://myapp.com/dashboard
+```
 
 ### Snapshot the entire app
 
@@ -86,11 +96,11 @@ Works with any URL your machine can reach — localhost, staging, production.
 The snapshot workflow:
 1. **Discovers routes** — scans your codebase for route definitions (React Router, Next.js, Vue Router, Express, Django, Rails, etc.)
 2. **Handles auth** — logs in if needed so authenticated pages are captured
-3. **Screenshots every page** — navigates to each route and takes a full-page screenshot
+3. **Screenshots every page at three viewports** — desktop, tablet, mobile (default)
 4. **Tags with metadata** — every screenshot title includes the date and last git commit hash (e.g., `App Snapshot — 2025-06-15 — a1b2c3d — /dashboard`)
-5. **Uploads to Screenote** — all screenshots are uploaded for review and annotation
+5. **Uploads to Screenote** — all viewports are uploaded; reviewers flip between them per page
 
-Use `mobile` for mobile viewport: `/snapshot mobile http://localhost:3000`
+Use `desktop`, `tablet`, or `mobile` for single-viewport: `/snapshot mobile http://localhost:3000`
 
 ### Read annotations
 
