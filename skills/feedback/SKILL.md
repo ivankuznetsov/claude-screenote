@@ -36,26 +36,31 @@ Call `list_screenshots` with project_id and page_id.
 
 Call `list_annotations` with project_id, screenshot_id, status: "open".
 
+Optional viewport filter: if the user's argument starts with `desktop`, `tablet`, or `mobile`, pass `viewport: <keyword>` as well so only annotations drawn against that layout come back.
+
 If zero annotations → say:
   "No open annotations for this screenshot. Open the annotate URL to add feedback, or check if annotations are marked as resolved." Include annotate_url if available. Stop.
 
 ## Step 4: Get Visual Context
 
-For each annotation, call `get_annotation` to retrieve the cropped image of the annotated region.
+For each annotation, call `get_annotation` to retrieve the cropped image of the annotated region. The crop is pulled from the ScreenshotImage that matches `annotation.viewport` — so a mobile annotation shows the mobile-layout crop, not the desktop one.
 
 ## Step 5: Present Feedback
 
 Header: "Feedback for **<project_name>** — <page_name> — <version_title>"
 
+If annotations span multiple viewports, group them under subheadings: "Desktop (2 open)", "Tablet (1 open)", "Mobile (3 open)". Within a single-viewport response, a subheading is not needed.
+
 For each annotation, show:
+- Viewport label (e.g. "Desktop" / "iPad" / "Mobile") — critical context because layouts differ
 - Type (point/region) with coordinates
 - Author
 - Comment text
-- Cropped image
+- Cropped image (from the matching viewport's ScreenshotImage)
 
 ## Step 6: Offer Next Steps
 
 After presenting all annotations, ask the user if they'd like to:
 - Address a specific annotation (and mark it resolved via `resolve_annotation` when done)
-- Address all annotations one by one
+- Address all annotations one by one, optionally scoped to one viewport ("let's fix mobile first")
 - Take a new screenshot after making fixes (`/screenote <url>`)
