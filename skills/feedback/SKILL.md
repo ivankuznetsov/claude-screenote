@@ -73,9 +73,25 @@ For each annotation, show:
 - Comment text
 - Cropped image (from the matching viewport's ScreenshotImage)
 
-## Step 6: Offer Next Steps
+## Step 6: Fix and Respond
 
-After presenting all annotations, ask the user if they'd like to:
-- Address a specific annotation (and mark it resolved via `resolve_annotation` when done)
-- Address all annotations one by one, optionally scoped to one viewport ("let's fix mobile first")
-- Take a new screenshot after making fixes (`/screenote <url>`)
+After presenting all annotations, ask the user what to do:
+- **Fix a specific annotation** (and comment + resolve when done)
+- **Fix all annotations** one by one, optionally scoped to one viewport ("let's fix mobile first")
+- **Reply without fixing** (leave a comment explaining why, then resolve)
+- **Take a new screenshot** after making fixes (`/screenote <url>`)
+
+For each annotation being addressed:
+
+1. **Fix the code** (if a code change is needed)
+2. **Post a reply comment** explaining what was done:
+   - Call `add_annotation_comment` with `project_id`, `annotation_id`, and a `body` describing the fix (all three are required)
+   - Comment format: describe what was changed and where, e.g. `Fixed: adjusted button color. Changed: src/components/Button.tsx:42 — updated background color from red to blue`
+   - For "won't fix" / "by design" cases, explain the reasoning instead, e.g. `Won't fix: the button is intentionally disabled for free-tier users`
+3. **Resolve the annotation**:
+   - Call `resolve_annotation` with `project_id`, `annotation_id`, and a brief `comment` (e.g., "Fixed" or "Won't fix — see reply")
+4. **Handle failures by error class** — don't blindly continue:
+   - **401 / 403 (auth)**: stop. Show the error, tell the developer to re-authenticate. Do NOT call `resolve_annotation` (it would resolve with no audit trail).
+   - **422 (validation)**: show the error, adjust the `body`, retry the comment.
+   - **5xx / network**: retry once. If still failing, surface the error and stop — don't resolve without the explanatory comment.
+   - **If `resolve_annotation` itself fails**: report the error verbatim, do not retry silently.
