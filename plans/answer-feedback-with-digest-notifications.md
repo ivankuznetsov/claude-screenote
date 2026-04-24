@@ -107,30 +107,37 @@ Annotation resolved (any source: MCP tool OR web UI)
   → AnnotationComment created with action: :resolved
   → notified_at is NULL by default
 
-SolidQueue job (every 60 min, production only)
+SolidQueue job (every 60 min, production only, retry_on transient errors)
   → Query: AnnotationComment.where(action: :resolved, notified_at: nil)
-  → Filter out self-resolutions (resolver == annotation author)
+           .where.associated(:annotation).limit(1000)
   → Filter out authors without email
   → Group by annotation author
-  → Send one digest email per author
-  → UPDATE notified_at for sent comments
+  → Filter out self-resolutions (resolver == annotation author)
+  → Per author (with rescue + circuit breaker):
+      → deliver_now the digest email
+      → UPDATE notified_at (chunked in 500s) on success
+  → ensure: sweep_orphaned_resolutions
 ```
+
+Delivery is **at-least-once**: if a crash or DB failure lands between a successful `deliver_now` and the follow-up `update_all`, the retry will send one duplicate. This is an intentional trade-off — dropping a digest on a transient error is a worse user experience than the rare duplicate.
 
 ### Migration
 
 ```ruby
 # db/migrate/XXXXXX_add_notified_at_to_annotation_comments.rb
 class AddNotifiedAtToAnnotationComments < ActiveRecord::Migration[8.1]
-  def change
+  def up
     add_column :annotation_comments, :notified_at, :datetime
 
-    # Mark all existing resolved comments as already notified to prevent retroactive spam
-    reversible do |dir|
-      dir.up do
-        resolved_value = AnnotationComment.actions[:resolved]
-        execute "UPDATE annotation_comments SET notified_at = CURRENT_TIMESTAMP WHERE action = #{resolved_value}"
-      end
-    end
+    # Mark all existing resolved comments as already notified to prevent
+    # retroactive spam on first deploy. Action enum: 0=comment, 1=resolved,
+    # 2=reopened. Hard-coded intentionally — migrations must be self-contained
+    # and independent of the current AR model definition.
+    execute "UPDATE annotation_comments SET notified_at = CURRENT_TIMESTAMP WHERE action = 1"
+  end
+
+  def down
+    remove_column :annotation_comments, :notified_at
   end
 end
 ```
@@ -142,18 +149,22 @@ end
 class SendDigestNotificationsJob < ApplicationJob
   queue_as :default
 
-  # Hard SMTP errors worth dropping (invalid recipient, permanent reject).
-  # Transient SMTP errors (Net::SMTPServerBusy, Net::ReadTimeout) propagate
-  # so SolidQueue can retry — notified_at is still NULL at that point.
-  DROP_ERRORS = [
-    Net::SMTPFatalError,
-    Net::SMTPSyntaxError,
-    Net::SMTPAuthenticationError
-  ].freeze
+  # Transient failures get a fresh job run. SolidQueue backs off polynomially
+  # so a flapping provider doesn't hammer us. The narrow allowlist is
+  # intentional — non-transient errors (template bugs, auth misconfig) must
+  # fail loudly on the first attempt.
+  retry_on Net::ReadTimeout, Net::SMTPServerBusy, Errno::ECONNRESET,
+           wait: :polynomially_longer, attempts: 5
+  discard_on ActiveJob::DeserializationError
+
+  # Per-run cap. Prevents memory blow-up on backlog recovery (missed runs)
+  # and keeps update_all IN-clauses below typical DB bind-parameter limits.
+  # A run that hits the cap leaves older resolutions for the next tick.
+  PER_RUN_LIMIT = 1000
 
   # After this many consecutive send_digest failures in a single run, re-raise
-  # so the job fails loudly instead of silently dropping every hour's digests
-  # (e.g. mailer template regression, ENV misconfig).
+  # so the job fails loudly. Catches systemic regressions (template bug, ENV
+  # misconfig) where every author would otherwise be dropped one by one.
   CIRCUIT_THRESHOLD = 3
 
   def perform
@@ -164,22 +175,26 @@ class SendDigestNotificationsJob < ApplicationJob
       .each do |author, comments|
         next if author.nil? || author.email.blank?
 
-        # Filter out self-resolutions
         # ApiKey belongs_to :project (no user association), so API resolutions
         # cannot be identified as self-review — they always notify.
-        non_self = comments.reject { |c| c.user.present? && c.user == author }
+        non_self = comments.reject { |c| c.user_id == author.id }
         next if non_self.empty?
 
         begin
           send_digest(author, non_self)
           consecutive_failures = 0
-        rescue *DROP_ERRORS => e
-          report_drop(author, non_self, e)
+        rescue => e
+          # Per-author failure isolation: one bad author (malformed email,
+          # unexpected data) must not abort the entire run. Report, bump the
+          # counter, and continue — the breaker decides when to give up.
+          Rails.error.report(e, context: { recipient_id: author.id })
           consecutive_failures += 1
           raise if consecutive_failures >= CIRCUIT_THRESHOLD
         end
       end
-
+  ensure
+    # Runs even on circuit-breaker re-raise so orphan rows never persist
+    # across runs inflating the query.
     sweep_orphaned_resolutions
   end
 
@@ -188,7 +203,9 @@ class SendDigestNotificationsJob < ApplicationJob
   def unnotified_resolutions
     AnnotationComment
       .where(action: :resolved, notified_at: nil)
+      .where.associated(:annotation) # INNER JOIN drops orphaned annotation_id rows
       .includes(:user, annotation: [:user, { screenshot: { page: :project } }])
+      .limit(PER_RUN_LIMIT)
   end
 
   # Mark notifications for resolutions whose annotation author was deleted
@@ -202,33 +219,24 @@ class SendDigestNotificationsJob < ApplicationJob
       .where("users.id IS NULL OR users.email IS NULL OR users.email = ''")
       .pluck(:id)
 
-    AnnotationComment.where(id: orphan_ids).update_all(notified_at: Time.current) if orphan_ids.any?
+    orphan_ids.each_slice(500) do |slice|
+      AnnotationComment.where(id: slice).update_all(notified_at: Time.current)
+    end
   end
 
   def send_digest(recipient, comments)
-    # Mark as notified BEFORE sending to guarantee at-most-once delivery on
-    # hard failures. Transient errors (SMTP busy, timeouts) propagate so
-    # SolidQueue retries; hard DROP_ERRORS are caught in #perform and reported
-    # to the exception tracker. Resolutions remain visible in the UI either way.
+    # Deliver first, then mark notified on success. This is at-least-once:
+    # a SIGKILL or DB failure between successful deliver_now and the
+    # update_all can cause one duplicate email on retry. We prefer rare
+    # duplicates over silent drops — transient SMTP errors now reliably
+    # retry with notified_at still NULL.
     comment_ids = comments.map(&:id)
-    AnnotationComment.where(id: comment_ids).update_all(notified_at: Time.current)
     NotificationMailer.resolution_digest(recipient, comments).deliver_now
-  rescue *DROP_ERRORS
-    raise # let #perform report and apply the circuit breaker
-  rescue => e
-    # Non-SMTP error after the mark succeeded (e.g. template bug). Re-raise so
-    # SolidQueue records the job failure AND the exception tracker catches it.
-    # notified_at stays set — we accept the drop for this batch to avoid dupes.
-    Rails.error.report(e, context: { recipient_id: recipient.id, comment_ids: comment_ids })
-    raise
-  end
 
-  def report_drop(recipient, comments, error)
-    Rails.error.report(error, context: {
-      recipient_id: recipient.id,
-      comment_ids: comments.map(&:id),
-      reason: "hard SMTP failure — digest dropped"
-    })
+    # Chunked to avoid bind-parameter limits on large backlogs.
+    comment_ids.each_slice(500) do |slice|
+      AnnotationComment.where(id: slice).update_all(notified_at: Time.current)
+    end
   end
 end
 ```
@@ -247,6 +255,20 @@ production:
     class: SendDigestNotificationsJob
     schedule: every hour at minute 0
 ```
+
+### SMTP Configuration
+
+Set explicit SMTP timeouts in production so a hung connection cannot stall the hourly run:
+
+```ruby
+# config/environments/production.rb
+config.action_mailer.smtp_settings.merge!(
+  open_timeout: 10,  # seconds to wait for connection
+  read_timeout: 20   # seconds to wait for server response
+)
+```
+
+Worst-case wall-clock per run is `PER_RUN_LIMIT * read_timeout = 1000 * 20s ≈ 5.5h` if every delivery hangs — in practice SolidQueue's retry discipline and the circuit breaker (3 consecutive failures → re-raise) bound the damage long before that. A run that exceeds the 60-minute schedule will overlap with the next tick; both invocations query `notified_at: nil` and could race on the same rows. Accept the rare duplicate (at-least-once semantics) or add an advisory lock around `#perform` at implementation time.
 
 ### Mailer
 
@@ -273,32 +295,34 @@ class NotificationMailer < ApplicationMailer
   end
 
   def prepare_grouped_comments(comments)
-    latest_replies = latest_reply_by_annotation(comments)
+    latest_replies = latest_reply_per_resolution(comments)
 
     comments.group_by { |c| c.annotation.screenshot }.map do |screenshot, screenshot_comments|
       {
         page_name: screenshot.page.name,
         screenshot_title: screenshot.title,
-        items: screenshot_comments.map { |c| build_item(c, latest_replies[c.annotation_id]) }
+        items: screenshot_comments.map { |c| build_item(c, latest_replies[c.id]) }
       }
     end
   end
 
-  # Single query: for each annotation in the batch, find the most recent reply
-  # comment posted at or before the resolution's created_at. Avoids N+1 in
-  # #build_item.
-  def latest_reply_by_annotation(comments)
-    resolution_times = comments.index_by(&:annotation_id).transform_values(&:created_at)
-    annotation_ids = resolution_times.keys
+  # For each resolution in the batch, find its annotation's most recent reply
+  # posted at or before the resolution's created_at. Keyed by the resolution's
+  # own id (not annotation_id) so reopen-resolve-reopen-resolve flows with
+  # multiple unnotified resolutions per annotation each get the correct reply.
+  # One query fetches every relevant reply; the per-resolution match runs in
+  # Ruby to keep the SQL simple.
+  def latest_reply_per_resolution(resolutions)
+    annotation_ids = resolutions.map(&:annotation_id).uniq
 
-    replies = AnnotationComment
+    replies_by_annotation = AnnotationComment
       .where(annotation_id: annotation_ids, action: :comment)
       .order(annotation_id: :asc, created_at: :desc)
+      .group_by(&:annotation_id)
 
-    replies.each_with_object({}) do |reply, acc|
-      next if acc[reply.annotation_id] # already kept the newest
-      next if reply.created_at > resolution_times[reply.annotation_id]
-      acc[reply.annotation_id] = reply
+    resolutions.each_with_object({}) do |resolution, acc|
+      candidates = replies_by_annotation[resolution.annotation_id] || []
+      acc[resolution.id] = candidates.find { |r| r.created_at <= resolution.created_at }
     end
   end
 
@@ -366,17 +390,21 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 | Case | Behavior |
 |---|---|
 | Self-review (resolver == annotation author) | Filtered out in job, no email |
-| API key resolution (no user on ApiKey) | Cannot determine resolver identity — always notifies |
-| Author has no email or was deleted | `sweep_orphaned_resolutions` marks them notified so they aren't re-queried forever |
-| Transient SMTP error (busy, timeout) | Propagates out of `send_digest`; SolidQueue retries with `notified_at` still NULL |
-| Hard SMTP error (fatal, auth, syntax) | Caught and reported; digest dropped (at-most-once) |
-| Non-SMTP error after marking notified (template bug, etc.) | Reported to exception tracker; job re-raises; batch is dropped to avoid dupes |
-| >=3 consecutive `send_digest` failures in one run | Circuit breaker re-raises so the job fails loudly (catches systemic regressions) |
+| API-key resolution (no user on ApiKey) | Cannot determine resolver identity — always notifies |
+| Author has no email or was deleted | `sweep_orphaned_resolutions` (in `ensure`) marks them notified so they aren't re-queried forever |
+| Orphaned `annotation_id` (deleted annotation) | `where.associated(:annotation)` drops them from the main query; sweep handles them |
+| Transient SMTP error (busy, timeout, reset) | `retry_on` reschedules the job; `notified_at` still NULL because the update runs only on success |
+| Hard SMTP error or unexpected exception | Per-author `rescue` isolates the batch; reported to exception tracker; counter advances the circuit breaker |
+| Crash between successful `deliver_now` and `update_all` | One duplicate email on retry (at-least-once trade-off; preferred over silent drops) |
+| >=3 consecutive per-author failures in one run | Circuit breaker re-raises so the job fails loudly (catches template regressions, ENV misconfig) |
+| Backlog recovery | `PER_RUN_LIMIT = 1000` + chunked `update_all` slices of 500 keep memory and IN-clause sizes bounded |
+| Overlapping runs (prior tick exceeded 60 min) | Both invocations may pick up the same `notified_at: nil` rows; accepted as at-least-once, or add an advisory lock at implementation time |
 | First deploy with existing data | Migration backfills `notified_at` on all existing resolved comments |
 | Manual resolution via web UI | Same `AnnotationComment` with `action: resolved` is created, job picks it up |
 | Multiple authors on same screenshot | Each author gets their own digest |
 | Zero resolutions in an hour | Job runs, finds nothing, exits cleanly |
 | Comments span multiple projects | Subject line shows project count |
+| Reopen → resolve → reopen → resolve in one batch | `latest_reply_per_resolution` keys by resolution id so each resolution shows the correct prior reply |
 
 ---
 
@@ -392,18 +420,23 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 ### Part 2: Digest Notifications
 - [ ] `notified_at` column added to `annotation_comments`
 - [ ] `SendDigestNotificationsJob` runs every 60 minutes via SolidQueue (production only)
-- [ ] Job groups unnotified resolved comments by annotation author
-- [ ] Self-resolutions (resolver == author) are filtered out (API-key resolutions always notify)
+- [ ] `retry_on Net::ReadTimeout, Net::SMTPServerBusy, Errno::ECONNRESET` with polynomial backoff declared on the job
+- [ ] `PER_RUN_LIMIT = 1000` caps rows loaded per run; `update_all` runs in chunks of 500
+- [ ] `where.associated(:annotation)` drops orphaned annotation_id rows from the main query
+- [ ] Self-resolutions filtered via `c.user_id == author.id` (API-key resolutions always notify)
 - [ ] One digest email per author per run
 - [ ] Email lists resolved annotations grouped by screenshot/page
 - [ ] Email includes the reviewer's original annotation text and Claude's reply
-- [ ] No N+1 in mailer: latest-reply lookup is a single query keyed by `annotation_id`
-- [ ] `notified_at` set before `deliver_now` to guarantee at-most-once delivery on hard failures
-- [ ] Transient SMTP errors propagate to SolidQueue retries (notified_at still NULL)
-- [ ] Hard SMTP errors and post-mark failures are reported to the exception tracker (not just `Rails.logger`)
-- [ ] Circuit breaker re-raises after 3 consecutive `send_digest` failures in one run
-- [ ] Orphaned resolutions (deleted user / no email) are swept so they don't re-queue forever
+- [ ] No N+1 in mailer: `latest_reply_per_resolution` keys by resolution id (handles reopen flows)
+- [ ] `deliver_now` runs BEFORE `update_all(notified_at:)` — at-least-once semantics (rare crash-duplicates preferred over silent drops)
+- [ ] Transient SMTP errors rely on `retry_on` for retry, not on a hand-rolled path
+- [ ] Per-author `rescue` in `#perform` isolates one bad author from the rest of the run
+- [ ] Per-author failures reported to `Rails.error` with `recipient_id` context
+- [ ] Circuit breaker re-raises after 3 consecutive per-author failures in one run
+- [ ] `sweep_orphaned_resolutions` runs in `ensure` so it executes even on circuit-breaker re-raise
+- [ ] Production `smtp_settings.open_timeout` / `read_timeout` configured so hung connections cannot stall the run
 - [ ] First deploy does not spam existing users (migration backfills `notified_at`)
+- [ ] Migration is self-contained — no reference to `AnnotationComment.actions[:resolved]`
 - [ ] No queries in email template — all data prepared in mailer
 
 ---
