@@ -23,9 +23,9 @@ Reviewers leave visual annotations on screenshots. Claude fixes the issues and m
 
 ### What Changes
 
-Update `skills/feedback/SKILL.md` Step 6 to instruct Claude to always post an explanatory comment before resolving. (Feedback flow was extracted from `skills/screenote/SKILL.md` into its own skill after this plan was drafted.)
+Update `skills/feedback/SKILL.md` Step 6 to instruct Claude to always post an explanatory comment before resolving.
 
-### Current Behavior (Step 6)
+### Prior Behavior (Step 6, replaced by this PR)
 
 ```markdown
 ### Step 6: Offer Next Steps
@@ -45,12 +45,12 @@ After presenting annotations, ask the user what to do. Then for each annotation 
 
 1. **Fix the code** (if a code change is needed)
 2. **Post a reply comment** explaining what was done:
-   - Call `add_annotation_comment` with `annotation_id` and a `body` describing the fix
+   - Call `add_annotation_comment` with `project_id`, `annotation_id`, and a `body` describing the fix
    - Comment format: describe what was changed and where (file:line)
    - For "won't fix" / "by design" cases, explain the reasoning instead
 3. **Resolve the annotation**:
-   - Call `resolve_annotation` with a brief `comment` (e.g., "Fixed" or "Won't fix — see reply")
-4. **If `add_annotation_comment` fails**, warn the developer but proceed with `resolve_annotation` anyway
+   - Call `resolve_annotation` with `project_id`, `annotation_id`, and a brief `comment` (e.g., "Fixed" or "Won't fix — see reply")
+4. **Handle failures by error class** — 401/403 stop and re-auth (do not resolve), 422 show and retry, 5xx/network retry once then stop; report `resolve_annotation` failures verbatim
 
 Offer these options:
 - Fix a specific annotation (and comment + resolve when done)
@@ -82,8 +82,11 @@ Won't fix: [reason]
 
 **Q: What if the MCP call fails?**
 
-If `add_annotation_comment` fails → warn developer, proceed to resolve anyway.
-If `resolve_annotation` fails → report the error, do not retry silently.
+Branch on error class — never blindly proceed:
+- 401 / 403 on `add_annotation_comment` → stop, prompt re-auth, do NOT call `resolve_annotation` (resolving with no explanatory comment leaves a silent audit gap and the resolve will likely fail anyway).
+- 422 validation → surface the error, adjust body, retry.
+- 5xx / network → retry once; if still failing, stop.
+- `resolve_annotation` failure → report the error verbatim, do not retry silently.
 
 ### Files to Change
 
@@ -124,7 +127,8 @@ class AddNotifiedAtToAnnotationComments < ActiveRecord::Migration[8.1]
     # Mark all existing resolved comments as already notified to prevent retroactive spam
     reversible do |dir|
       dir.up do
-        execute "UPDATE annotation_comments SET notified_at = CURRENT_TIMESTAMP WHERE action = 1"
+        resolved_value = AnnotationComment.actions[:resolved]
+        execute "UPDATE annotation_comments SET notified_at = CURRENT_TIMESTAMP WHERE action = #{resolved_value}"
       end
     end
   end
@@ -138,7 +142,23 @@ end
 class SendDigestNotificationsJob < ApplicationJob
   queue_as :default
 
+  # Hard SMTP errors worth dropping (invalid recipient, permanent reject).
+  # Transient SMTP errors (Net::SMTPServerBusy, Net::ReadTimeout) propagate
+  # so SolidQueue can retry — notified_at is still NULL at that point.
+  DROP_ERRORS = [
+    Net::SMTPFatalError,
+    Net::SMTPSyntaxError,
+    Net::SMTPAuthenticationError
+  ].freeze
+
+  # After this many consecutive send_digest failures in a single run, re-raise
+  # so the job fails loudly instead of silently dropping every hour's digests
+  # (e.g. mailer template regression, ENV misconfig).
+  CIRCUIT_THRESHOLD = 3
+
   def perform
+    consecutive_failures = 0
+
     unnotified_resolutions
       .group_by { |c| c.annotation.user }
       .each do |author, comments|
@@ -150,8 +170,17 @@ class SendDigestNotificationsJob < ApplicationJob
         non_self = comments.reject { |c| c.user.present? && c.user == author }
         next if non_self.empty?
 
-        send_digest(author, non_self)
+        begin
+          send_digest(author, non_self)
+          consecutive_failures = 0
+        rescue *DROP_ERRORS => e
+          report_drop(author, non_self, e)
+          consecutive_failures += 1
+          raise if consecutive_failures >= CIRCUIT_THRESHOLD
+        end
       end
+
+    sweep_orphaned_resolutions
   end
 
   private
@@ -159,18 +188,47 @@ class SendDigestNotificationsJob < ApplicationJob
   def unnotified_resolutions
     AnnotationComment
       .where(action: :resolved, notified_at: nil)
-      .includes(annotation: [:user, { screenshot: { page: :project } }])
+      .includes(:user, annotation: [:user, { screenshot: { page: :project } }])
+  end
+
+  # Mark notifications for resolutions whose annotation author was deleted
+  # or has no email. Without this, they stay notified_at: nil forever and
+  # are re-queried on every run.
+  def sweep_orphaned_resolutions
+    orphan_ids = AnnotationComment
+      .where(action: :resolved, notified_at: nil)
+      .joins("LEFT JOIN annotations ON annotations.id = annotation_comments.annotation_id")
+      .joins("LEFT JOIN users ON users.id = annotations.user_id")
+      .where("users.id IS NULL OR users.email IS NULL OR users.email = ''")
+      .pluck(:id)
+
+    AnnotationComment.where(id: orphan_ids).update_all(notified_at: Time.current) if orphan_ids.any?
   end
 
   def send_digest(recipient, comments)
-    # Mark as notified BEFORE sending to guarantee at-most-once delivery.
-    # If deliver_now later fails, we accept the dropped email rather than risk
-    # sending duplicates on the next job run. Resolutions remain visible in the UI.
-    AnnotationComment.where(id: comments.map(&:id)).update_all(notified_at: Time.current)
+    # Mark as notified BEFORE sending to guarantee at-most-once delivery on
+    # hard failures. Transient errors (SMTP busy, timeouts) propagate so
+    # SolidQueue retries; hard DROP_ERRORS are caught in #perform and reported
+    # to the exception tracker. Resolutions remain visible in the UI either way.
+    comment_ids = comments.map(&:id)
+    AnnotationComment.where(id: comment_ids).update_all(notified_at: Time.current)
     NotificationMailer.resolution_digest(recipient, comments).deliver_now
+  rescue *DROP_ERRORS
+    raise # let #perform report and apply the circuit breaker
   rescue => e
-    Rails.logger.error("Digest notification failed for user #{recipient.id}: #{e.message}")
-    # notified_at is already set; email is dropped, not retried.
+    # Non-SMTP error after the mark succeeded (e.g. template bug). Re-raise so
+    # SolidQueue records the job failure AND the exception tracker catches it.
+    # notified_at stays set — we accept the drop for this batch to avoid dupes.
+    Rails.error.report(e, context: { recipient_id: recipient.id, comment_ids: comment_ids })
+    raise
+  end
+
+  def report_drop(recipient, comments, error)
+    Rails.error.report(error, context: {
+      recipient_id: recipient.id,
+      comment_ids: comments.map(&:id),
+      reason: "hard SMTP failure — digest dropped"
+    })
   end
 end
 ```
@@ -215,23 +273,36 @@ class NotificationMailer < ApplicationMailer
   end
 
   def prepare_grouped_comments(comments)
+    latest_replies = latest_reply_by_annotation(comments)
+
     comments.group_by { |c| c.annotation.screenshot }.map do |screenshot, screenshot_comments|
       {
         page_name: screenshot.page.name,
         screenshot_title: screenshot.title,
-        items: screenshot_comments.map { |c| build_item(c) }
+        items: screenshot_comments.map { |c| build_item(c, latest_replies[c.annotation_id]) }
       }
     end
   end
 
-  def build_item(resolution_comment)
-    # Find the most recent reply comment posted before or at the same time as the resolution
-    reply = resolution_comment.annotation.annotation_comments
-      .where(action: :comment)
-      .where("created_at <= ?", resolution_comment.created_at)
-      .order(created_at: :desc)
-      .first
+  # Single query: for each annotation in the batch, find the most recent reply
+  # comment posted at or before the resolution's created_at. Avoids N+1 in
+  # #build_item.
+  def latest_reply_by_annotation(comments)
+    resolution_times = comments.index_by(&:annotation_id).transform_values(&:created_at)
+    annotation_ids = resolution_times.keys
 
+    replies = AnnotationComment
+      .where(annotation_id: annotation_ids, action: :comment)
+      .order(annotation_id: :asc, created_at: :desc)
+
+    replies.each_with_object({}) do |reply, acc|
+      next if acc[reply.annotation_id] # already kept the newest
+      next if reply.created_at > resolution_times[reply.annotation_id]
+      acc[reply.annotation_id] = reply
+    end
+  end
+
+  def build_item(resolution_comment, reply)
     {
       annotation_text: resolution_comment.annotation.comment,
       reply_text: reply&.body,
@@ -296,9 +367,11 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 |---|---|
 | Self-review (resolver == annotation author) | Filtered out in job, no email |
 | API key resolution (no user on ApiKey) | Cannot determine resolver identity — always notifies |
-| Author has no email | Skipped in job |
-| Job fails before marking notified | Comments keep `notified_at: nil`, retried next run |
-| Deliver fails after marking notified | Email is dropped (at-most-once); resolutions remain visible in the UI |
+| Author has no email or was deleted | `sweep_orphaned_resolutions` marks them notified so they aren't re-queried forever |
+| Transient SMTP error (busy, timeout) | Propagates out of `send_digest`; SolidQueue retries with `notified_at` still NULL |
+| Hard SMTP error (fatal, auth, syntax) | Caught and reported; digest dropped (at-most-once) |
+| Non-SMTP error after marking notified (template bug, etc.) | Reported to exception tracker; job re-raises; batch is dropped to avoid dupes |
+| >=3 consecutive `send_digest` failures in one run | Circuit breaker re-raises so the job fails loudly (catches systemic regressions) |
 | First deploy with existing data | Migration backfills `notified_at` on all existing resolved comments |
 | Manual resolution via web UI | Same `AnnotationComment` with `action: resolved` is created, job picks it up |
 | Multiple authors on same screenshot | Each author gets their own digest |
@@ -311,21 +384,25 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 
 ### Part 1: Answer Feedback
 - [ ] Claude posts a reply comment (via `add_annotation_comment`) before resolving any annotation
+- [ ] Both MCP calls pass `project_id` alongside `annotation_id`
 - [ ] Reply comment describes what was changed (file, line, summary) or why it won't be fixed
-- [ ] `resolve_annotation` is called after the comment is posted
-- [ ] If comment posting fails, Claude warns the developer and resolves anyway
+- [ ] `resolve_annotation` is called after the comment is posted — except on 401/403 from the comment call, where Claude stops and prompts re-auth
 - [ ] "Reply without fixing" option available for won't-fix cases
 
 ### Part 2: Digest Notifications
 - [ ] `notified_at` column added to `annotation_comments`
 - [ ] `SendDigestNotificationsJob` runs every 60 minutes via SolidQueue (production only)
 - [ ] Job groups unnotified resolved comments by annotation author
-- [ ] Self-resolutions (resolver == author) are filtered out
+- [ ] Self-resolutions (resolver == author) are filtered out (API-key resolutions always notify)
 - [ ] One digest email per author per run
 - [ ] Email lists resolved annotations grouped by screenshot/page
 - [ ] Email includes the reviewer's original annotation text and Claude's reply
-- [ ] `notified_at` set before `deliver_now` to guarantee at-most-once delivery
-- [ ] Deliver failures are logged and dropped (no duplicate emails on retry)
+- [ ] No N+1 in mailer: latest-reply lookup is a single query keyed by `annotation_id`
+- [ ] `notified_at` set before `deliver_now` to guarantee at-most-once delivery on hard failures
+- [ ] Transient SMTP errors propagate to SolidQueue retries (notified_at still NULL)
+- [ ] Hard SMTP errors and post-mark failures are reported to the exception tracker (not just `Rails.logger`)
+- [ ] Circuit breaker re-raises after 3 consecutive `send_digest` failures in one run
+- [ ] Orphaned resolutions (deleted user / no email) are swept so they don't re-queue forever
 - [ ] First deploy does not spam existing users (migration backfills `notified_at`)
 - [ ] No queries in email template — all data prepared in mailer
 
