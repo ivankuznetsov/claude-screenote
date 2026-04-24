@@ -380,8 +380,93 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 | `config/recurring.yml` | Edit | Add job under `production:` key |
 | `app/mailers/notification_mailer.rb` | Create | Digest mailer with data preparation |
 | `app/views/notification_mailer/resolution_digest.html.erb` | Create | Email template (render only, no queries) |
-| `test/jobs/send_digest_notifications_job_test.rb` | Create | Job tests |
-| `test/mailers/notification_mailer_test.rb` | Create | Mailer tests |
+| `test/jobs/send_digest_notifications_job_test.rb` | Create | Job tests (see Required Test Cases below) |
+| `test/mailers/notification_mailer_test.rb` | Create | Mailer tests (see Required Test Cases below) |
+| `test/system/digest_notifications_test.rb` | Create | End-to-end delivery test using Rails' test mail delivery |
+
+---
+
+## Required Test Cases
+
+The plan's correctness relies on non-obvious invariants (at-least-once delivery, circuit-breaker semantics, orphan handling, reopen flows). The implementation PR must include each test below — the list is exhaustive, not suggestive. Happy-path-only coverage is not sufficient.
+
+### `test/jobs/send_digest_notifications_job_test.rb`
+
+**At-least-once delivery invariant**
+- `deliver_now runs before update_all`: stub `deliver_now` to raise; assert `notified_at` is still NULL for all batch rows after `perform` returns.
+- `update_all sets notified_at only after successful delivery`: stub `deliver_now` to record the `notified_at` values observed during the mail build; assert they were all NULL at send time.
+- `Crash between deliver_now and update_all causes one duplicate on retry`: send successfully, force `update_all` to raise, assert next `perform` re-sends the same digest. (Documents the accepted trade-off.)
+
+**Transient-error retry contract**
+- `Net::ReadTimeout during deliver_now leaves notified_at NULL and propagates`: assert rescue did not swallow, `notified_at` still NULL, exception bubbles out of `#perform` (so SolidQueue's `retry_on` fires).
+- `Net::SMTPServerBusy behaves the same as ReadTimeout`.
+- `retry_on declarations match the expected transient classes`: reflect on the job class and assert `Net::ReadTimeout`, `Net::SMTPServerBusy`, `Errno::ECONNRESET` are covered with `wait: :polynomially_longer`.
+
+**Per-author failure isolation**
+- `Exception for author A does not abort author B`: stub author A's mailer to raise, author B's to succeed; assert B received their digest.
+- `Failed author is reported to Rails.error with recipient_id context`: capture the reporter call and assert `context[:recipient_id]`.
+
+**Circuit breaker**
+- `3 consecutive per-author failures re-raise from #perform`: stub all mailer calls to raise, assert `#perform` raises after the third failure; authors beyond the third are not attempted.
+- `Counter resets after a successful send`: fail, fail, succeed, fail, fail — assert #perform does NOT re-raise (consecutive count stayed ≤2).
+- `Counter increments for non-SMTP errors too` (template bugs should advance the breaker, not just hard SMTP failures).
+
+**Orphan handling**
+- `where.associated(:annotation) drops AnnotationComments with deleted annotation_id`: create a resolved comment then delete its annotation; assert it never reaches the mailer.
+- `sweep runs on happy path`: one row with deleted annotation.user; assert `notified_at` set after `perform`.
+- `sweep runs on circuit-breaker re-raise`: force breaker to trip, assert orphan rows still got swept (tests the `ensure` block).
+- `sweep handles deleted user`: user record removed; row is marked notified.
+- `sweep handles NULL email`: user exists with `email: nil`; row is marked notified.
+- `sweep handles empty-string email`: user exists with `email: ""`; row is marked notified.
+- `sweep does NOT mark rows with valid users` (sanity: the sweep filter is correct).
+
+**Self-resolution filter**
+- `Comment where user_id == author.id is filtered out`: create a resolution by the annotation's author; assert no email.
+- `Comment with user: nil (API-key resolution) is NOT filtered`: create a resolution via an ApiKey; assert the annotation author receives an email.
+- `Comment by a different user is not filtered`: normal case.
+
+**Scope and batching**
+- `PER_RUN_LIMIT cap enforced`: seed 1500 unnotified resolutions, assert exactly 1000 processed this run, 500 remain for next tick.
+- `Chunked update_all runs in slices of 500`: spy on `AnnotationComment.where(...).update_all`; assert the call count equals `ceil(comment_count / 500)`.
+- `Author with nil email is skipped`: create a resolution whose annotation.user has `email: nil`; no mail sent.
+- `Author with blank email is skipped`: `email: ""`.
+- `discard_on ActiveJob::DeserializationError declared`.
+
+**Query-count assertions (N+1 prevention)**
+- `#perform issues a bounded number of queries for N authors with M total resolutions`: wrap in `assert_queries_count(≤10)` (or equivalent). Dropping any eager-load from `includes(...)` must fail this test.
+- `latest_reply_per_resolution is one query regardless of batch size`: seed 50 annotations, 10 replies each; assert exactly one SELECT against `annotation_comments` for the reply lookup.
+
+### `test/mailers/notification_mailer_test.rb`
+
+**Subject line**
+- `Singular count`: one resolution → `"[Screenote] 1 annotation resolved in <project>"`.
+- `Plural count`: two resolutions → `"2 annotations resolved"`.
+- `One project`: project name in subject.
+- `Multiple projects`: `"N projects"` label.
+
+**`latest_reply_per_resolution`**
+- `Keys by resolution id, not annotation_id`: annotation with two unnotified resolutions (reopen-resolve-reopen-resolve); assert each resolution maps to the reply that was latest *as of that resolution's created_at*, not the globally latest reply.
+- `Reply created at exact resolution timestamp is included`: boundary — `created_at == resolution.created_at` must be eligible.
+- `Reply created after resolution is excluded`.
+- `Annotation with zero replies returns nil`: `build_item` must produce `reply_text: nil` without error.
+- `Only action: :comment replies counted`: seed a `:resolved` comment and a `:reopened` comment for the same annotation; neither should be picked as the reply.
+
+**Template rendering**
+- `Renders with replies present and absent without raising`.
+- `Renders when resolver is nil` (API-key case): assert `"API"` fallback appears.
+- `No queries in ERB`: `assert_queries_count(0)` during `mail.body.to_s` after data is prepared.
+- `Email has host set` (regression for missing `default_url_options[:host]` in test/prod).
+
+### `test/system/digest_notifications_test.rb` (end-to-end)
+
+- `Resolved annotation produces a queued mail in the next job run`: resolve via MCP-path fixture, run the job, assert `ActionMailer::Base.deliveries` grew by 1.
+- `Resolved annotation via web UI produces the same mail`: parity with MCP path.
+- `Migration backfill prevents first-deploy spam`: seed an AnnotationComment with `action: :resolved, notified_at: nil` as if pre-migration, run the migration, assert the row is marked notified before the job runs.
+
+### SKILL.md Step 6 (advisory — no in-repo test harness)
+
+This repo has no Ruby test runner; the skill's per-error-class branching is LLM-instruction-following. A weak guard is better than none:
+- Add a manual QA script under `docs/qa/feedback-step6.md` listing the scenarios the implementer should hand-test (401 on comment, 422 on comment, 5xx then success on comment, resolve failure) and the expected agent behavior for each.
 
 ---
 
@@ -438,6 +523,7 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 - [ ] First deploy does not spam existing users (migration backfills `notified_at`)
 - [ ] Migration is self-contained — no reference to `AnnotationComment.actions[:resolved]`
 - [ ] No queries in email template — all data prepared in mailer
+- [ ] Every test listed in **Required Test Cases** (above) has a corresponding passing assertion — no happy-path-only coverage
 
 ---
 
