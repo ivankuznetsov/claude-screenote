@@ -23,7 +23,7 @@ Reviewers leave visual annotations on screenshots. Claude fixes the issues and m
 
 ### What Changes
 
-Update `skills/screenote/SKILL.md` Step 6 to instruct Claude to always post an explanatory comment before resolving.
+Update `skills/feedback/SKILL.md` Step 6 to instruct Claude to always post an explanatory comment before resolving. (Feedback flow was extracted from `skills/screenote/SKILL.md` into its own skill after this plan was drafted.)
 
 ### Current Behavior (Step 6)
 
@@ -89,7 +89,7 @@ If `resolve_annotation` fails → report the error, do not retry silently.
 
 | File | Change |
 |---|---|
-| `skills/screenote/SKILL.md:172-178` | Replace Step 6 with new "Fix and Respond" workflow |
+| `skills/feedback/SKILL.md` Step 6 | Replace "Offer Next Steps" with new "Fix and Respond" workflow |
 
 ---
 
