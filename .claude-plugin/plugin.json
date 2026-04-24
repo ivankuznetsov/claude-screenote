@@ -1,6 +1,6 @@
 {
   "name": "claude-screenote",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Screenshot pages, take full app snapshots, upload to Screenote for human annotation, and retrieve visual feedback — all from Claude Code.",
   "author": {
     "name": "ivankuznetsov"
