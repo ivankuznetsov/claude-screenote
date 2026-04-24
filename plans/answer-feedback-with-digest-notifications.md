@@ -9,7 +9,7 @@ Currently, when Claude retrieves annotations from Screenote, it can only mark th
 
 The feature spans two repos:
 - **claude-screenote** (this repo) — SKILL.md changes for comment-before-resolve behavior
-- **screenote** (Rails app at `/home/asterio/Dev/screenote/`) — new column, mailer, and background job for digest notifications
+- **screenote** (the Rails app) — new column, mailer, and background job for digest notifications
 
 ## Problem Statement
 
@@ -163,12 +163,14 @@ class SendDigestNotificationsJob < ApplicationJob
   end
 
   def send_digest(recipient, comments)
-    NotificationMailer.resolution_digest(recipient, comments).deliver_now
-
+    # Mark as notified BEFORE sending to guarantee at-most-once delivery.
+    # If deliver_now later fails, we accept the dropped email rather than risk
+    # sending duplicates on the next job run. Resolutions remain visible in the UI.
     AnnotationComment.where(id: comments.map(&:id)).update_all(notified_at: Time.current)
+    NotificationMailer.resolution_digest(recipient, comments).deliver_now
   rescue => e
     Rails.logger.error("Digest notification failed for user #{recipient.id}: #{e.message}")
-    # Comments keep notified_at as NULL; next job run will retry
+    # notified_at is already set; email is dropped, not retried.
   end
 end
 ```
@@ -295,7 +297,8 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 | Self-review (resolver == annotation author) | Filtered out in job, no email |
 | API key resolution (no user on ApiKey) | Cannot determine resolver identity — always notifies |
 | Author has no email | Skipped in job |
-| Job fails mid-batch | Unsent comments keep `notified_at: nil`, retried next run |
+| Job fails before marking notified | Comments keep `notified_at: nil`, retried next run |
+| Deliver fails after marking notified | Email is dropped (at-most-once); resolutions remain visible in the UI |
 | First deploy with existing data | Migration backfills `notified_at` on all existing resolved comments |
 | Manual resolution via web UI | Same `AnnotationComment` with `action: resolved` is created, job picks it up |
 | Multiple authors on same screenshot | Each author gets their own digest |
@@ -321,8 +324,8 @@ Note: Email templates require inline styles for cross-client compatibility (inte
 - [ ] One digest email per author per run
 - [ ] Email lists resolved annotations grouped by screenshot/page
 - [ ] Email includes the reviewer's original annotation text and Claude's reply
-- [ ] `notified_at` set after email sent
-- [ ] Failed sends leave `notified_at` as NULL for retry
+- [ ] `notified_at` set before `deliver_now` to guarantee at-most-once delivery
+- [ ] Deliver failures are logged and dropped (no duplicate emails on retry)
 - [ ] First deploy does not spam existing users (migration backfills `notified_at`)
 - [ ] No queries in email template — all data prepared in mailer
 
