@@ -149,12 +149,13 @@ end
 class SendDigestNotificationsJob < ApplicationJob
   queue_as :default
 
-  # Transient failures get a fresh job run. SolidQueue backs off polynomially
-  # so a flapping provider doesn't hammer us. The narrow allowlist is
-  # intentional — non-transient errors (template bugs, auth misconfig) must
+  # Transient failures get a fresh job run via retry_on. SolidQueue backs off
+  # polynomially so a flapping provider doesn't hammer us. The narrow allowlist
+  # is intentional — non-transient errors (template bugs, auth misconfig) must
   # fail loudly on the first attempt.
-  retry_on Net::ReadTimeout, Net::SMTPServerBusy, Errno::ECONNRESET,
-           wait: :polynomially_longer, attempts: 5
+  TRANSIENT_ERRORS = [Net::ReadTimeout, Net::SMTPServerBusy, Errno::ECONNRESET].freeze
+
+  retry_on(*TRANSIENT_ERRORS, wait: :polynomially_longer, attempts: 5)
   discard_on ActiveJob::DeserializationError
 
   # Per-run cap. Prevents memory blow-up on backlog recovery (missed runs)
@@ -176,17 +177,31 @@ class SendDigestNotificationsJob < ApplicationJob
         next if author.nil? || author.email.blank?
 
         # ApiKey belongs_to :project (no user association), so API resolutions
-        # cannot be identified as self-review — they always notify.
-        non_self = comments.reject { |c| c.user_id == author.id }
+        # have c.user_id == nil and fall into non_self (they always notify).
+        self_comments, non_self = comments.partition { |c| c.user_id == author.id }
+
+        # Mark self-resolutions as notified even though no email goes out — the
+        # author already knows (they resolved their own annotation). Without
+        # this, self-resolved rows stay notified_at: nil forever and eventually
+        # consume PER_RUN_LIMIT on every subsequent run.
+        mark_notified(self_comments.map(&:id)) if self_comments.any?
+
         next if non_self.empty?
 
         begin
           send_digest(author, non_self)
           consecutive_failures = 0
+        rescue *TRANSIENT_ERRORS
+          # Transient network/SMTP errors re-raise out of per-author isolation
+          # so retry_on fires and the whole job is rescheduled. Catching them
+          # here would defeat retry_on — the rows already marked (author A's
+          # successful batch) stay marked on retry, and the failing author's
+          # rows stay notified_at: nil for the next attempt.
+          raise
         rescue => e
-          # Per-author failure isolation: one bad author (malformed email,
-          # unexpected data) must not abort the entire run. Report, bump the
-          # counter, and continue — the breaker decides when to give up.
+          # Per-author failure isolation for non-transient errors. One bad
+          # author (malformed email, unexpected data, template crash) must
+          # not abort the run. Report, bump the counter, continue.
           Rails.error.report(e, context: { recipient_id: author.id })
           consecutive_failures += 1
           raise if consecutive_failures >= CIRCUIT_THRESHOLD
@@ -219,9 +234,7 @@ class SendDigestNotificationsJob < ApplicationJob
       .where("users.id IS NULL OR users.email IS NULL OR users.email = ''")
       .pluck(:id)
 
-    orphan_ids.each_slice(500) do |slice|
-      AnnotationComment.where(id: slice).update_all(notified_at: Time.current)
-    end
+    mark_notified(orphan_ids)
   end
 
   def send_digest(recipient, comments)
@@ -230,10 +243,14 @@ class SendDigestNotificationsJob < ApplicationJob
     # update_all can cause one duplicate email on retry. We prefer rare
     # duplicates over silent drops — transient SMTP errors now reliably
     # retry with notified_at still NULL.
-    comment_ids = comments.map(&:id)
     NotificationMailer.resolution_digest(recipient, comments).deliver_now
+    mark_notified(comments.map(&:id))
+  end
 
-    # Chunked to avoid bind-parameter limits on large backlogs.
+  # Chunked so large backlogs never approach DB bind-parameter limits.
+  def mark_notified(comment_ids)
+    return if comment_ids.empty?
+
     comment_ids.each_slice(500) do |slice|
       AnnotationComment.where(id: slice).update_all(notified_at: Time.current)
     end
@@ -400,6 +417,8 @@ The plan's correctness relies on non-obvious invariants (at-least-once delivery,
 **Transient-error retry contract**
 - `Net::ReadTimeout during deliver_now leaves notified_at NULL and propagates`: assert rescue did not swallow, `notified_at` still NULL, exception bubbles out of `#perform` (so SolidQueue's `retry_on` fires).
 - `Net::SMTPServerBusy behaves the same as ReadTimeout`.
+- `Errno::ECONNRESET behaves the same as ReadTimeout`.
+- `Per-author rescue re-raises TRANSIENT_ERRORS instead of isolating`: stub author B's mailer to raise `Net::ReadTimeout` after author A succeeded; assert #perform raises (not swallows) and `consecutive_failures` is NOT incremented for the transient.
 - `retry_on declarations match the expected transient classes`: reflect on the job class and assert `Net::ReadTimeout`, `Net::SMTPServerBusy`, `Errno::ECONNRESET` are covered with `wait: :polynomially_longer`.
 
 **Per-author failure isolation**
@@ -422,6 +441,8 @@ The plan's correctness relies on non-obvious invariants (at-least-once delivery,
 
 **Self-resolution filter**
 - `Comment where user_id == author.id is filtered out`: create a resolution by the annotation's author; assert no email.
+- `Self-resolution row is marked notified_at`: after #perform, the skipped self-resolution has `notified_at` set and will not be re-queried on the next run.
+- `Author with ONLY self-resolutions skips email but still marks rows`: `non_self.empty?` path must still call `mark_notified(self_comments.map(&:id))`.
 - `Comment with user: nil (API-key resolution) is NOT filtered`: create a resolution via an ApiKey; assert the annotation author receives an email.
 - `Comment by a different user is not filtered`: normal case.
 
@@ -474,11 +495,11 @@ This repo has no Ruby test runner; the skill's per-error-class branching is LLM-
 
 | Case | Behavior |
 |---|---|
-| Self-review (resolver == annotation author) | Filtered out in job, no email |
+| Self-review (resolver == annotation author) | Filtered out (no email) AND marked `notified_at` so the rows don't re-queue every run |
 | API-key resolution (no user on ApiKey) | Cannot determine resolver identity — always notifies |
 | Author has no email or was deleted | `sweep_orphaned_resolutions` (in `ensure`) marks them notified so they aren't re-queried forever |
 | Orphaned `annotation_id` (deleted annotation) | `where.associated(:annotation)` drops them from the main query; sweep handles them |
-| Transient SMTP error (busy, timeout, reset) | `retry_on` reschedules the job; `notified_at` still NULL because the update runs only on success |
+| Transient SMTP error (busy, timeout, reset) | Per-author rescue re-raises `TRANSIENT_ERRORS` so `retry_on` fires and reschedules the whole job; `notified_at` still NULL for the failing author |
 | Hard SMTP error or unexpected exception | Per-author `rescue` isolates the batch; reported to exception tracker; counter advances the circuit breaker |
 | Crash between successful `deliver_now` and `update_all` | One duplicate email on retry (at-least-once trade-off; preferred over silent drops) |
 | >=3 consecutive per-author failures in one run | Circuit breaker re-raises so the job fails loudly (catches template regressions, ENV misconfig) |
@@ -509,6 +530,8 @@ This repo has no Ruby test runner; the skill's per-error-class branching is LLM-
 - [ ] `PER_RUN_LIMIT = 1000` caps rows loaded per run; `update_all` runs in chunks of 500
 - [ ] `where.associated(:annotation)` drops orphaned annotation_id rows from the main query
 - [ ] Self-resolutions filtered via `c.user_id == author.id` (API-key resolutions always notify)
+- [ ] Self-resolution rows are marked `notified_at` even though no email is sent, so they don't re-queue every run and consume `PER_RUN_LIMIT`
+- [ ] Per-author rescue re-raises `TRANSIENT_ERRORS` so `retry_on` fires on transient failures (does NOT swallow them into per-author isolation)
 - [ ] One digest email per author per run
 - [ ] Email lists resolved annotations grouped by screenshot/page
 - [ ] Email includes the reviewer's original annotation text and Claude's reply
