@@ -13,7 +13,7 @@
       "name": "claude-screenote",
       "source": "./",
       "description": "Screenshot pages, upload to Screenote for human annotation, and retrieve visual feedback — all from Claude Code.",
-      "version": "1.0.0",
+      "version": "1.4.0",
       "author": {
         "name": "ivankuznetsov"
       },
