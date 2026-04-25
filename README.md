@@ -24,7 +24,7 @@ Then open Codex's plugin UI (`/plugins`) and install **Screenote** from **AI Kuz
 Direct Claude Code install remains available for existing users:
 
 ```bash
-/plugin marketplace add ivankuznetsov/claude-screenote
+/plugin marketplace add ivankuznetsov/screenote-skills
 /plugin install screenote@screenote-marketplace
 ```
 

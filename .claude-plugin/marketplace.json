@@ -18,7 +18,7 @@
         "name": "ivankuznetsov"
       },
       "homepage": "https://screenote.ai",
-      "repository": "https://github.com/ivankuznetsov/claude-screenote",
+      "repository": "https://github.com/ivankuznetsov/screenote-skills",
       "license": "MIT",
       "keywords": [
         "agent-skill",
