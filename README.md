@@ -1,43 +1,58 @@
-# claude-screenote
+# Screenote
 
-Give your AI coding agent eyes. Screenshot any page — or snapshot your entire app — annotate in Screenote, and let Claude Code read your feedback — all without leaving the terminal.
+Give your AI coding agent eyes. Screenshot any page, snapshot your whole app, annotate in Screenote, and let Claude Code or Codex read the feedback without leaving the terminal.
+
+**Supports Claude Code + Codex (GPT-5.5).**
 
 ## Quick Start
 
 ### 1. Install the plugin
 
-In Claude Code, run:
+Recommended marketplace install:
 
+```bash
+/plugin marketplace add ivankuznetsov/agent-plugins
+/plugin install screenote@aikuznetsov-marketplace
 ```
+
+```bash
+codex plugin marketplace add ivankuznetsov/agent-plugins
+```
+
+Then open Codex's plugin UI (`/plugins`) and install **Screenote** from **AI Kuznetsov**.
+
+Direct Claude Code install remains available for existing users:
+
+```bash
 /plugin marketplace add ivankuznetsov/claude-screenote
-/plugin install claude-screenote@screenote-marketplace
+/plugin install screenote@screenote-marketplace
 ```
 
 ### 2. Connect to Screenote
 
-On first use, Claude Code will open a browser window to authorize access to your Screenote account.
+On first use, the agent will authorize access to your Screenote account through the Screenote MCP server.
 
 ### 3. Use it
 
-Tell Claude Code to screenshot a page:
+Tell the agent to screenshot a page:
 
-```
+```bash
 /screenote http://localhost:3000/login
 ```
 
 You'll get a link to annotate the screenshot in Screenote. Draw on it, leave comments, then pull the feedback back:
 
-```
+```bash
 /feedback
 ```
 
-Claude sees every annotation with its position and comment, and can start fixing things right away.
+The agent sees every annotation with its position and comment, and can start fixing things right away.
 
 ### 4. Snapshot your entire app
 
 Take a visual snapshot of every page in your app at once:
 
-```
+```bash
 /snapshot http://localhost:3000
 ```
 
@@ -46,7 +61,7 @@ The agent discovers all routes in your codebase, handles authentication, and scr
 ## How It Works
 
 ```
-You                       Claude Code                  Screenote
+You                       Agent                        Screenote
  │                            │                            │
  │  "fix the login page"      │                            │
  │ ──────────────────────────►│                            │
@@ -69,9 +84,11 @@ You                       Claude Code                  Screenote
 
 ## Usage
 
+Claude Code examples below use slash commands. In Codex, use the same skill names through the plugin namespace, for example `$screenote:screenote`, `$screenote:feedback`, and `$screenote:snapshot`.
+
 ### Screenshot a page
 
-```
+```bash
 /screenote https://myapp.com/dashboard
 ```
 
@@ -81,7 +98,7 @@ Works with any URL your machine can reach — localhost, staging, production.
 
 For a single viewport instead, prefix the argument:
 
-```
+```bash
 /screenote desktop https://myapp.com/dashboard
 /screenote tablet  https://myapp.com/dashboard
 /screenote mobile  https://myapp.com/dashboard
@@ -89,7 +106,7 @@ For a single viewport instead, prefix the argument:
 
 ### Snapshot the entire app
 
-```
+```bash
 /snapshot http://localhost:3000
 ```
 
@@ -102,7 +119,7 @@ The snapshot workflow:
 
 For a single viewport, prefix the argument:
 
-```
+```bash
 /snapshot desktop http://localhost:3000
 /snapshot tablet  http://localhost:3000
 /snapshot mobile  http://localhost:3000
@@ -112,15 +129,15 @@ For a single viewport, prefix the argument:
 
 After you've annotated the screenshot in Screenote:
 
-```
+```bash
 /feedback
 ```
 
-Claude matches your local project name to a Screenote project, lists recent screenshots by title, and lets you pick one. Each annotation is presented with its position and comment, then Claude offers to fix the issues.
+The agent matches your local project name to a Screenote project, lists recent screenshots by title, and lets you pick one. Each annotation is presented with its position and comment, then the agent offers to fix the issues.
 
 Filter by viewport by prefixing the argument:
 
-```
+```bash
 /feedback desktop
 /feedback mobile login
 ```
@@ -129,11 +146,11 @@ Filter by viewport by prefixing the argument:
 
 You can also just describe what you want:
 
-```
+```bash
 /screenote the signup page
 ```
 
-Claude will figure out the URL from your project's routes.
+The agent will figure out the URL from your project's routes.
 
 ### Project matching
 
@@ -142,8 +159,9 @@ The plugin automatically matches your local working directory name to a Screenot
 ## Requirements
 
 - A [Screenote](https://screenote.ai) account
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
-- [Playwright plugin](https://github.com/anthropics/claude-plugins-official) for browser screenshots
+- Claude Code or Codex
+- Browser automation available to the agent for screenshots
+- The Screenote MCP server configured by this plugin
 
 ## License
 

@@ -1,13 +1,13 @@
 ---
 name: screenote
 description: Capture a page at desktop/tablet/mobile viewports and upload to Screenote for human annotation
-user_invocable: true
-argument: "[desktop|tablet|mobile] [url-or-description]"
+metadata:
+  argument: "[desktop|tablet|mobile] [url-or-description]"
 ---
 
 # Screenote — Visual Feedback Loop
 
-You are executing the Screenote skill. This connects Claude Code to Screenote for visual feedback: screenshot a page at three viewports by default (desktop, tablet, mobile) and upload them as one logical Screenshot that the human can annotate per-viewport.
+You are executing the Screenote skill. This connects Codex to Screenote for visual feedback: screenshot a page at three viewports by default (desktop, tablet, mobile) and upload them as one logical Screenshot that the human can annotate per-viewport.
 
 Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.json` configures the MCP server connection. No API key needed.
 
@@ -15,7 +15,7 @@ Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.jso
 
 Parse the user's argument:
 
-- If the argument starts with `feedback` → tell the user: "Feedback has moved to its own command. Run `/feedback` (or `/screenote:feedback`) instead." Stop.
+- If the argument starts with `feedback` → tell the user: "Feedback has moved to its own command. Run `$screenote:feedback` instead." Stop.
 - If the argument starts with `desktop`, `tablet`, or `mobile` → **single-viewport mode**: capture only that viewport (strip the keyword from the argument; the rest is the URL/description).
 - Otherwise → **multi-viewport mode (default)**: capture all three viewports (desktop + tablet + mobile) as one Screenshot.
 
@@ -131,7 +131,7 @@ Fixed `/tmp/...` paths would collide with concurrent `/screenote` runs and are a
 
 #### 4c. Capture and upload each viewport, serially
 
-Playwright MCP shares a single browser context, so do **not** parallelize. For each `entry` in `uploads`, in order:
+Browser automation usually shares a single browser context, so do **not** parallelize. Use the browser automation tools available in the current Codex environment, such as Playwright MCP or an installed browser automation skill. If no browser automation tool is available, stop and tell the user to enable one before capturing. For each `entry` in `uploads`, in order:
 
 1. **Resize** via `browser_resize` to the dimensions from the Viewport Dimensions table above, keyed on `entry.viewport`.
 2. **Navigate** via `browser_navigate` to the URL. Fresh navigate per viewport — safer for SPAs that read viewport at mount time than a resize-only flow.

@@ -1,8 +1,8 @@
 ---
 name: snapshot
 description: Take a full app snapshot — discover all routes, screenshot every page at desktop/tablet/mobile viewports, and upload to Screenote with date and commit metadata
-user_invocable: true
-argument: "[desktop|tablet|mobile] [base-url or description]"
+metadata:
+  argument: "[desktop|tablet|mobile] [base-url or description]"
 ---
 
 # Snapshot — Full App Visual Snapshot
@@ -28,7 +28,7 @@ Use the canonical Viewport Dimensions table from the `/screenote` skill (`skills
 
 ## Step 1: Pick a Project
 
-Follow the **Project Cache** and **Pick a Project** procedure from the `/screenote` skill (`skills/screenote/SKILL.md`). The logic is identical: call `list_projects` first (auth gate), then check `.screenote/screenote-cache.json` with legacy `.claude/screenote-cache.json` fallback, match by local project name, or prompt the user.
+Follow the **Project Cache** and **Pick a Project** procedure from the `screenote` skill (`codex-skills/screenote/SKILL.md`). The logic is identical: call `list_projects` first (auth gate), then check `.screenote/screenote-cache.json` with legacy `.claude/screenote-cache.json` fallback, match by local project name, or prompt the user.
 
 ---
 

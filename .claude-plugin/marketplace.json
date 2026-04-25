@@ -5,15 +5,15 @@
     "email": "github@ivankuznetsov"
   },
   "metadata": {
-    "description": "Visual feedback loop for Claude Code — screenshot, annotate, fix",
+    "description": "Visual feedback loop for Claude Code and Codex — screenshot, annotate, fix",
     "version": "1.0.0"
   },
   "plugins": [
     {
-      "name": "claude-screenote",
+      "name": "screenote",
       "source": "./",
-      "description": "Screenshot pages, upload to Screenote for human annotation, and retrieve visual feedback — all from Claude Code.",
-      "version": "1.4.0",
+      "description": "Screenshot pages, upload to Screenote for human annotation, and retrieve visual feedback from Claude Code or Codex.",
+      "version": "1.5.0",
       "author": {
         "name": "ivankuznetsov"
       },
@@ -21,8 +21,9 @@
       "repository": "https://github.com/ivankuznetsov/claude-screenote",
       "license": "MIT",
       "keywords": [
-        "claude-skill",
+        "agent-skill",
         "claude-code",
+        "codex",
         "screenote",
         "visual-feedback",
         "screenshot",
