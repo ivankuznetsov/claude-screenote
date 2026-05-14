@@ -116,9 +116,9 @@ Build a list of route paths (e.g., `/`, `/login`, `/dashboard`, `/settings`, `/u
 
 After static analysis, optionally navigate to the base URL and extract links.
 
-1. Set the Browser Use MCP session to **desktop** dimensions (see `/screenote` Viewport Dimensions) before any browser interaction. Discovery must run at desktop width regardless of Mode Detection — at mobile width, responsive apps commonly collapse the primary nav into a hamburger menu, which hides links from the page state and causes routes to be silently omitted from the snapshot. If the active Browser Use MCP server cannot set viewport dimensions, fail loudly and name the missing viewport-sizing capability.
-2. Navigate to `base_url` with the Browser Use MCP navigation tool
-3. Use Browser Use MCP page state first to inspect interactive elements and links; if that does not include enough link data, fetch the page HTML through Browser Use MCP and extract same-origin `<a href>` values from it
+1. Set the browser-use MCP session to **desktop** dimensions (see `/screenote` Viewport Dimensions) before any browser interaction. Discovery must run at desktop width regardless of Mode Detection — at mobile width, responsive apps commonly collapse the primary nav into a hamburger menu, which hides links from the page state and causes routes to be silently omitted from the snapshot. If the active browser-use MCP server cannot set viewport dimensions, fail loudly and name the missing viewport-sizing capability.
+2. Navigate to `base_url` with the browser-use MCP navigation tool
+3. Use browser-use MCP page state first to inspect interactive elements and links; if that does not include enough link data, fetch the page HTML through browser-use MCP and extract same-origin `<a href>` values from it
 4. Extract all internal links (same-origin `<a href>` values)
 5. Add any new routes not found in static analysis
 
@@ -176,7 +176,7 @@ Some pages require login. Detect and handle this.
 
 **Security note — read before asking the user for credentials:** Anything the user types in response to "how should I log in?" will be visible in the conversation context (and any transcripts/exports derived from it). Before asking, recommend these safer paths in order:
 
-1. **Pre-authenticated browser session** (preferred): ask the user to log in manually in the Browser Use MCP browser session before running `/snapshot` — the session cookies persist and no credentials enter the transcript.
+1. **Pre-authenticated browser session** (preferred): browser-use launched via `uvx ... --mcp` with no persistent profile starts a **fresh Chromium per server lifetime**, so a manual login from a prior `/snapshot` run does not carry over. Instead: once the current `/snapshot` run has launched the browser-use MCP server (its Chromium window will open), have the agent navigate to the login page, then log in yourself in that same window before the agent continues capturing. Cookies persist for the rest of this snapshot run, and no credentials enter the transcript.
 2. **Environment variables**: have the user put the credentials in env vars and reference them in the login flow without echoing the values.
 3. **Test/staging account with limited permissions**: only if no other option exists.
 
@@ -191,11 +191,11 @@ Only if the user explicitly opts into form login with typed credentials should y
 
 ### Login Flow (if needed)
 
-1. Navigate to the login page using the Browser Use MCP navigation tool
-2. Use Browser Use MCP page state to identify the form fields and their element indices
-3. Fill in credentials using the Browser Use MCP typing tool for each field
-4. Submit the form using the Browser Use MCP click tool
-5. Wait for redirect/confirmation by polling Browser Use MCP page state until the URL, title, or authenticated UI changes. Do not use fixed sleeps
+1. Navigate to the login page using the browser-use MCP navigation tool
+2. Use browser-use MCP page state to identify the form fields and their element indices
+3. Fill in credentials using the browser-use MCP typing tool for each field
+4. Submit the form using the browser-use MCP click tool
+5. Wait for redirect/confirmation by polling browser-use MCP page state until the URL, title, or authenticated UI changes. Do not use fixed sleeps
 6. Verify login succeeded by checking the resulting page
 
 **Important:** Perform login **once**. The browser session will maintain cookies/tokens for subsequent page visits.
@@ -211,6 +211,10 @@ Split the screenshot loop into two phases so public pages are captured in their 
 ---
 
 ## Step 7: Screenshot Each Page
+
+<!-- Parity note: this Step 7 reference and the equivalent line in codex-skills/snapshot/SKILL.md
+     must move together. Update both files (Claude → skills/screenote/..., Codex → codex-skills/screenote/...)
+     in the same change so the pair does not drift. -->
 
 Loop through the route list. For each route, perform the canonical capture-and-upload procedure from `/screenote` Step 4 (`skills/screenote/SKILL.md` § Step 4: Capture and Upload Each Viewport). That section covers response validation, the per-invocation temp dir, serial capture, safe curl invocation, token-expiry retry, and cleanup — do not re-implement any of those details here.
 
@@ -232,7 +236,7 @@ For each route (index `i`, path `<route_path>`):
 
 3. **Track progress**: after each route completes, print a line like `[3/12] /dashboard — desktop, tablet, mobile uploaded`. If the full-page cap fired for any viewport, include that in the route summary.
 
-Capture is serial — Browser Use MCP keeps browser state in one session.
+Capture is serial — browser-use MCP keeps browser state in one session.
 
 ### Error Handling
 
