@@ -32,6 +32,10 @@ Direct Claude Code install remains available for existing users:
 
 On first use, the agent will authorize access to your Screenote account through the Screenote MCP server.
 
+### Prerequisites
+
+Screenote launches browser automation through the local [browser-use](https://github.com/browser-use/browser-use) MCP server with `uvx --from browser-use[cli] browser-use --mcp`. Install [uv](https://github.com/astral-sh/uv) and Python 3.11+ so the plugin can start that server on demand.
+
 ### 3. Use it
 
 Tell the agent to screenshot a page:
@@ -160,7 +164,7 @@ The plugin automatically matches your local working directory name to a Screenot
 
 - A [Screenote](https://screenote.ai) account
 - Claude Code or Codex
-- Browser automation available to the agent for screenshots
+- Python 3.11+ and [uv](https://github.com/astral-sh/uv) for the bundled browser-use MCP server
 - The Screenote MCP server configured by this plugin
 
 ## License
