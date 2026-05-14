@@ -13,6 +13,8 @@ This is separate from the single-page `/screenote` command. Use `/snapshot` when
 
 Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.json` configures the MCP server connection. No API key needed.
 
+Full-page capture is the default for every route and viewport. `$screenote:snapshot` reuses the `$screenote:screenote` capture procedure, so each capture scrolls lazy-loaded content first, keeps sticky elements in place, and caps tall pages at **5000 px / 10 scrolls**.
+
 ## Mode Detection
 
 Parse the user's argument:
@@ -114,9 +116,9 @@ Build a list of route paths (e.g., `/`, `/login`, `/dashboard`, `/settings`, `/u
 
 After static analysis, optionally navigate to the base URL and extract links.
 
-1. Resize the browser to **desktop** (see `/screenote` Viewport Dimensions) before any browser interaction. Discovery must run at desktop width regardless of Mode Detection — at mobile width, responsive apps commonly collapse the primary nav into a hamburger menu, which hides links from the accessibility tree and causes routes to be silently omitted from the snapshot.
-2. Navigate to `base_url` with `browser_navigate`
-3. Use `browser_snapshot` to get the page's accessibility tree
+1. Set the Browser Use MCP session to **desktop** dimensions (see `$screenote:screenote` Viewport Dimensions) before any browser interaction. Discovery must run at desktop width regardless of Mode Detection — at mobile width, responsive apps commonly collapse the primary nav into a hamburger menu, which hides links from the page state and causes routes to be silently omitted from the snapshot. If the active Browser Use MCP server cannot set viewport dimensions, fail loudly and name the missing viewport-sizing capability.
+2. Navigate to `base_url` with the Browser Use MCP navigation tool
+3. Use Browser Use MCP page state first to inspect interactive elements and links; if that does not include enough link data, fetch the page HTML through Browser Use MCP and extract same-origin `<a href>` values from it
 4. Extract all internal links (same-origin `<a href>` values)
 5. Add any new routes not found in static analysis
 
@@ -174,7 +176,7 @@ Some pages require login. Detect and handle this.
 
 **Security note — read before asking the user for credentials:** Anything the user types in response to "how should I log in?" will be visible in the conversation context (and any transcripts/exports derived from it). Before asking, recommend these safer paths in order:
 
-1. **Pre-authenticated browser session** (preferred): ask the user to log in manually in the Playwright browser before running `/snapshot` — the session cookies persist and no credentials enter the transcript.
+1. **Pre-authenticated browser session** (preferred): ask the user to log in manually in the Browser Use MCP browser session before running `$screenote:snapshot` — the session cookies persist and no credentials enter the transcript.
 2. **Environment variables**: have the user put the credentials in env vars and reference them in the login flow without echoing the values.
 3. **Test/staging account with limited permissions**: only if no other option exists.
 
@@ -189,11 +191,11 @@ Only if the user explicitly opts into form login with typed credentials should y
 
 ### Login Flow (if needed)
 
-1. Navigate to the login page using `browser_navigate`
-2. Use `browser_snapshot` to see the form fields
-3. Fill in credentials using `browser_type` for each field
-4. Submit the form using `browser_click`
-5. Wait for redirect/confirmation using `browser_wait_for`
+1. Navigate to the login page using the Browser Use MCP navigation tool
+2. Use Browser Use MCP page state to identify the form fields and their element indices
+3. Fill in credentials using the Browser Use MCP typing tool for each field
+4. Submit the form using the Browser Use MCP click tool
+5. Wait for redirect/confirmation by polling Browser Use MCP page state until the URL, title, or authenticated UI changes. Do not use fixed sleeps
 6. Verify login succeeded by checking the resulting page
 
 **Important:** Perform login **once**. The browser session will maintain cookies/tokens for subsequent page visits.
@@ -210,7 +212,7 @@ Split the screenshot loop into two phases so public pages are captured in their 
 
 ## Step 7: Screenshot Each Page
 
-Loop through the route list. For each route, perform the canonical capture-and-upload procedure from `/screenote` Step 4 (`skills/screenote/SKILL.md` § Step 4: Capture and Upload Each Viewport). That section covers response validation, the per-invocation temp dir, serial capture, safe curl invocation, token-expiry retry, and cleanup — do not re-implement any of those details here.
+Loop through the route list. For each route, perform the canonical capture-and-upload procedure from `$screenote:screenote` Step 4 (`codex-skills/screenote/SKILL.md` § Step 4: Capture and Upload Each Viewport). That section covers response validation, the per-invocation temp dir, serial capture, safe curl invocation, token-expiry retry, and cleanup — do not re-implement any of those details here.
 
 This skill adds the **per-route orchestration** on top:
 
@@ -228,9 +230,9 @@ For each route (index `i`, path `<route_path>`):
 
 2. **Run the `/screenote` Step 4 capture-and-upload procedure** against the returned `uploads` array. Use route-scoped filenames inside the mktemp dir (e.g. `$SCREENOTE_DIR/<i>-<viewport>.png`) so concurrent routes don't clobber each other if future versions parallelize.
 
-3. **Track progress**: after each route completes, print a line like `[3/12] /dashboard — desktop, tablet, mobile uploaded`.
+3. **Track progress**: after each route completes, print a line like `[3/12] /dashboard — desktop, tablet, mobile uploaded`. If the full-page cap fired for any viewport, include that in the route summary.
 
-Capture is serial — Playwright MCP shares one browser context.
+Capture is serial — Browser Use MCP keeps browser state in one session.
 
 ### Error Handling
 
