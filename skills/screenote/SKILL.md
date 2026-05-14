@@ -31,6 +31,29 @@ Fixed defaults (match Screenote server's canonical set):
 
 ---
 
+## Full-Page Capture
+
+By default, `/screenote` captures the entire scrolling page, not only the first viewport. Pages taller than **5000 px** are capped at the first 5000 px, and lazy-loaded pages are scrolled before capture. Sticky headers, footers, and sidebars stay in place; if stitching is needed, repeated sticky elements are expected.
+
+Use the direct-control tools exposed by the `browser-use` MCP server. The current local server exposes navigation, page state, HTML, scrolling, and screenshot tools, and its screenshot tool accepts `full_page: true`. It does not expose the old Playwright resize/wait/snapshot tool names. If the active `browser-use` server does not expose a way to set the target viewport dimensions, fail loudly and name the missing viewport-sizing capability instead of silently uploading the wrong dimensions.
+
+Full-page procedure for each viewport:
+
+1. After navigating, settle the page by polling Browser Use MCP page state and/or HTML until loading UI is gone and URL/title/HTML size/interactive-element count are stable across consecutive checks. Do not use fixed sleeps.
+2. Read the page-state metadata to get the current viewport height, current scroll position, and document height. If height metadata is unavailable, continue with the scroll loop but report that the cap was enforced by scroll count.
+3. Scroll downward by one viewport at a time with the Browser Use MCP scroll tool. After each scroll, poll page state again so lazy-loaded content can extend the page. Stop when the document height no longer grows between consecutive scrolls, the total scrolled distance reaches **5000 px**, or **10** downward scrolls have run, whichever happens first.
+4. Scroll back to the top. Use upward scrolls and verify via page-state metadata that the scroll position returned to zero before capturing.
+5. Preferred capture path: call the Browser Use MCP screenshot tool with `full_page: true`, save the returned PNG image content to `$SCREENOTE_DIR/<viewport>.png`, then check dimensions with `identify -format "%wx%h"`. If the image is taller than 5000 px, crop it:
+   ```bash
+   convert "$SCREENOTE_DIR/<viewport>.png" -crop x5000+0+0 +repage "$SCREENOTE_DIR/<viewport>.png"
+   ```
+6. Fallback capture path: if the screenshot tool cannot capture full-page images but can capture the visible viewport, capture viewport-sized PNG tiles while scrolling from top to bottom, stop at the 5000 px / 10-scroll cap, stitch them with `convert tile-*.png -append "$SCREENOTE_DIR/<viewport>.png"`, then crop to 5000 px if needed.
+7. Last resort: if neither full-page screenshot nor visible-viewport screenshot plus scrolling is available, fail loudly with the missing Browser Use MCP capability so the user knows to upgrade browser-use.
+
+The fallback path requires ImageMagick (`convert` and `identify`) on the machine running the agent.
+
+---
+
 ## Project Cache
 
 Call `list_projects` to verify the MCP connection and get the current project list. If the call fails with an auth error, tell the user to authorize the Screenote MCP server and stop.
@@ -43,6 +66,8 @@ Then check for a cached project selection:
 ---
 
 ## Capture Mode
+
+By default `/screenote` captures the **entire scrolling page** (full-page screenshot), not just the first viewport. Pages taller than 5000 px are capped at 5000 px.
 
 The user provided a URL or page description. Your job: screenshot it at the chosen viewport(s), upload to Screenote, return the annotation URL.
 
@@ -131,12 +156,12 @@ Fixed `/tmp/...` paths would collide with concurrent `/screenote` runs and are a
 
 #### 4c. Capture and upload each viewport, serially
 
-Playwright MCP shares a single browser context, so do **not** parallelize. For each `entry` in `uploads`, in order:
+Browser Use MCP keeps browser state in a shared session, so do **not** parallelize. For each `entry` in `uploads`, in order:
 
-1. **Resize** via `browser_resize` to the dimensions from the Viewport Dimensions table above, keyed on `entry.viewport`.
-2. **Navigate** via `browser_navigate` to the URL. Fresh navigate per viewport — safer for SPAs that read viewport at mount time than a resize-only flow.
-3. **Wait** via `browser_wait_for` for dynamic content (loading spinners, skeleton screens) to settle.
-4. **Screenshot** via `browser_take_screenshot` with `filename` = `$SCREENOTE_DIR/<viewport>.png` and `type` = `png`.
+1. **Set viewport** to the dimensions from the Viewport Dimensions table above, keyed on `entry.viewport`, using the Browser Use MCP viewport-sizing capability. If no such capability is exposed, stop and tell the user the active browser-use MCP server cannot set per-viewport dimensions.
+2. **Navigate** to the URL using the Browser Use MCP navigation tool. Fresh navigate per viewport — safer for SPAs that read viewport at mount time than a resize-only flow.
+3. **Settle** dynamic content (loading spinners, skeleton screens) by polling Browser Use MCP page state and/or HTML until stable. Do not use fixed sleeps.
+4. **Screenshot** by running the Full-Page Capture procedure above, producing `$SCREENOTE_DIR/<viewport>.png` as PNG bytes.
 5. **Upload** via curl using a shell variable for the URL — do not interpolate the value inline:
    ```bash
    UPLOAD_URL='<validated upload_url from 4a>'
@@ -168,4 +193,5 @@ Tell the user:
 - Say "Uploaded to **<project_name>**" and provide the **annotate_url** so they can open it in the browser and add annotations
 - Mention they can switch between viewports in Screenote using the device-icon toolbar
 - Tell them to run `/feedback` when they're done annotating
+- If the 5000 px / 10-scroll cap fired, say "Captured the first 5000 px / 10 scrolls; the page may extend further"
 - If any viewport failed after retry, list it explicitly
