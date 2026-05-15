@@ -84,6 +84,29 @@ for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
   fi
 done
 
+# Validate browser-use direct-control tool names are pinned in skills that use
+# the bundled browser-use MCP server. This keeps the prompts grep-able when the
+# upstream MCP surface changes.
+declare -A BROWSER_USE_TOOL_SKILLS=(
+  [browser_navigate]="screenote snapshot"
+  [browser_get_state]="screenote snapshot"
+  [browser_get_html]="screenote snapshot"
+  [browser_screenshot]="screenote"
+  [browser_scroll]="screenote"
+  [browser_type]="snapshot"
+  [browser_click]="snapshot"
+)
+for tool in "${!BROWSER_USE_TOOL_SKILLS[@]}"; do
+  for skill in ${BROWSER_USE_TOOL_SKILLS[$tool]}; do
+    skill_file="$SKILLS_DIR/$skill/SKILL.md"
+    if grep -q "$tool" "$skill_file"; then
+      pass "$skill references browser-use tool '$tool'"
+    else
+      fail "$skill missing expected browser-use tool '$tool'"
+    fi
+  done
+done
+
 # Check feedback-specific MCP tools
 FEEDBACK_TOOLS="list_pages list_screenshots list_annotations get_annotation resolve_annotation"
 for tool in $FEEDBACK_TOOLS; do
