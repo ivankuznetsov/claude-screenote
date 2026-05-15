@@ -9,11 +9,11 @@ metadata:
 
 You are executing the Snapshot skill. This captures a complete visual snapshot of an application: discover all routes, screenshot every page at three viewports (desktop, tablet, mobile) by default, and upload them to Screenote as a batch. Each screenshot is tagged with the current date and the last git commit hash.
 
-This is separate from the single-page `/screenote` command. Use `/snapshot` when you need a full picture of the entire app.
+This is separate from the single-page `$screenote:screenote` command. Use `$screenote:snapshot` when you need a full picture of the entire app.
 
 Authentication is handled automatically via OAuth 2.1 — the plugin's `.mcp.json` configures the MCP server connection. No API key needed.
 
-Full-page capture is the default for every route and viewport. `$screenote:snapshot` reuses the `$screenote:screenote` capture procedure, so each capture scrolls lazy-loaded content first, keeps sticky elements in place, and caps tall pages at **5000 px / 10 scrolls**.
+Full-page capture is the default for every route and viewport. `$screenote:snapshot` reuses the `$screenote:screenote` capture procedure, so each capture scrolls lazy-loaded content first, keeps sticky elements in place, and caps tall pages at **5000 px or 10 scrolls, whichever fires first**.
 
 ## Mode Detection
 
@@ -116,9 +116,9 @@ Build a list of route paths (e.g., `/`, `/login`, `/dashboard`, `/settings`, `/u
 
 After static analysis, optionally navigate to the base URL and extract links.
 
-1. Set the browser-use MCP session to **desktop** dimensions (see `$screenote:screenote` Viewport Dimensions) before any browser interaction. Discovery must run at desktop width regardless of Mode Detection — at mobile width, responsive apps commonly collapse the primary nav into a hamburger menu, which hides links from the page state and causes routes to be silently omitted from the snapshot. If the active browser-use MCP server cannot set viewport dimensions, fail loudly and name the missing viewport-sizing capability.
-2. Navigate to `base_url` with the browser-use MCP navigation tool
-3. Use browser-use MCP page state first to inspect interactive elements and links; if that does not include enough link data, fetch the page HTML through browser-use MCP and extract same-origin `<a href>` values from it
+1. Set the browser-use MCP session to **desktop** dimensions (see `$screenote:screenote` Viewport Dimensions) before any browser interaction. Discovery must run at desktop width regardless of Mode Detection — at mobile width, responsive apps commonly collapse the primary nav into a hamburger menu, which hides links from the page state and causes routes to be silently omitted from the snapshot. If the active browser-use MCP server cannot set viewport dimensions, use the canonical fail-loudly behavior from `$screenote:screenote`: stop before requesting upload URLs and report the missing viewport-sizing capability.
+2. Navigate to `base_url` with `browser_navigate`
+3. Use `browser_get_state` first to inspect interactive elements and links; if that does not include enough link data, fetch the page HTML through `browser_get_html` and extract same-origin `<a href>` values from it
 4. Extract all internal links (same-origin `<a href>` values)
 5. Add any new routes not found in static analysis
 
@@ -176,7 +176,7 @@ Some pages require login. Detect and handle this.
 
 **Security note — read before asking the user for credentials:** Anything the user types in response to "how should I log in?" will be visible in the conversation context (and any transcripts/exports derived from it). Before asking, recommend these safer paths in order:
 
-1. **Pre-authenticated browser session** (preferred): browser-use launched via `uvx ... --mcp` with no persistent profile starts a **fresh Chromium per server lifetime**, so a manual login from a prior `$screenote:snapshot` run does not carry over. Instead: once the current `$screenote:snapshot` run has launched the browser-use MCP server (its Chromium window will open), have the agent navigate to the login page, then log in yourself in that same window before the agent continues capturing. Cookies persist for the rest of this snapshot run, and no credentials enter the transcript.
+1. **Pre-authenticated browser session** (preferred): browser-use launched via `uvx ... --mcp` with no persistent profile starts a **fresh Chromium per server lifetime**, so a manual login from a prior `$screenote:snapshot` run does not carry over. The bundled `.mcp.json` sets `BROWSER_USE_HEADLESS=false`, so the current `$screenote:snapshot` run opens a visible Chromium window by default. Have the agent navigate to the login page, then log in yourself in that same window before the agent continues capturing. Cookies persist for the rest of this snapshot run, and no credentials enter the transcript.
 2. **Environment variables**: have the user put the credentials in env vars and reference them in the login flow without echoing the values.
 3. **Test/staging account with limited permissions**: only if no other option exists.
 
@@ -191,12 +191,13 @@ Only if the user explicitly opts into form login with typed credentials should y
 
 ### Login Flow (if needed)
 
-1. Navigate to the login page using the browser-use MCP navigation tool
-2. Use browser-use MCP page state to identify the form fields and their element indices
-3. Fill in credentials using the browser-use MCP typing tool for each field
-4. Submit the form using the browser-use MCP click tool
-5. Wait for redirect/confirmation by polling browser-use MCP page state until the URL, title, or authenticated UI changes. Do not use fixed sleeps
-6. Verify login succeeded by checking the resulting page
+1. Navigate to the login page using `browser_navigate`
+2. Dismiss cookie, geolocation, notification, or browser-permission overlays if `browser_get_state` exposes them; otherwise tell the user an overlay may remain visible in screenshots
+3. Use `browser_get_state` to identify the form fields and their element indices
+4. Fill in credentials using `browser_type` for each field
+5. Submit the form using `browser_click`
+6. Wait for redirect/confirmation by polling `browser_get_state` until the URL, title, or authenticated UI changes. Do not use fixed sleeps
+7. Verify login succeeded by checking the resulting page
 
 **Important:** Perform login **once**. The browser session will maintain cookies/tokens for subsequent page visits.
 
@@ -212,9 +213,8 @@ Split the screenshot loop into two phases so public pages are captured in their 
 
 ## Step 7: Screenshot Each Page
 
-<!-- Parity note: this Step 7 reference and the equivalent line in skills/snapshot/SKILL.md
-     must move together. Update both files (Claude → skills/screenote/..., Codex → codex-skills/screenote/...)
-     in the same change so the pair does not drift. -->
+<!-- Parity note: edit both `skills/snapshot/SKILL.md` and `codex-skills/snapshot/SKILL.md`
+     together so their cross-reference paths to the screenote skill do not drift. -->
 
 Loop through the route list. For each route, perform the canonical capture-and-upload procedure from `$screenote:screenote` Step 4 (`codex-skills/screenote/SKILL.md` § Step 4: Capture and Upload Each Viewport). That section covers response validation, the per-invocation temp dir, serial capture, safe curl invocation, token-expiry retry, and cleanup — do not re-implement any of those details here.
 
@@ -232,9 +232,9 @@ For each route (index `i`, path `<route_path>`):
      viewports: <viewports_to_capture as { viewport, mime_type: "image/png" } entries>
    ```
 
-2. **Run the `$screenote:screenote` Step 4 capture-and-upload procedure** against the returned `uploads` array. Use route-scoped filenames inside the mktemp dir (e.g. `$SCREENOTE_DIR/<i>-<viewport>.png`) so concurrent routes don't clobber each other if future versions parallelize.
+2. **Run the `$screenote:screenote` Step 4 capture-and-upload procedure** against the returned `uploads` array. Before each viewport capture, set `SCREENOTE_OUTPUT="$SCREENOTE_DIR/<i>-<viewport>.png"` so the shared procedure writes route-scoped files and appends route/viewport status to `run-status.jsonl`.
 
-3. **Track progress**: after each route completes, print a line like `[3/12] /dashboard — desktop, tablet, mobile uploaded`. If the full-page cap fired for any viewport, include that in the route summary.
+3. **Track progress**: after each route completes, print a line like `[3/12] /dashboard — desktop, tablet, mobile uploaded`. Read `run-status.jsonl`; if the full-page cap fired, capture was unsettled, scroll-to-top was unverified, or a viewport failed, include that route/viewport in the route summary.
 
 Capture is serial — browser-use MCP keeps browser state in one session.
 
@@ -243,7 +243,7 @@ Capture is serial — browser-use MCP keeps browser state in one session.
 - If a page returns a 404 or error, capture it anyway (the error state is useful for review) but note it in the summary
 - If a page requires auth and you're not logged in (redirects to login), note it and suggest the user provide credentials
 - If navigation times out, skip the page and note it in the summary
-- Token-expiry retries are already handled inside the `/screenote` Step 4 procedure — skipped viewports surface back here and should be recorded per-route in the summary
+- Token-expiry retries are already handled inside the `$screenote:screenote` Step 4 procedure — skipped viewports surface back through `run-status.jsonl` and should be recorded per-route in the summary
 - **If the process fails mid-batch** (API error, browser crash, network issue): report which pages were successfully uploaded versus which remain, clean up the temp directory, and offer to resume from the last failed page
 
 ---
@@ -260,6 +260,10 @@ Commit: a1b2c3d — "Fix header alignment"
 Viewports: Desktop + Tablet + Mobile (or "Desktop only" / "Mobile only" / etc.)
 Project: <project_name>
 Pages captured: 11/12 × 3 viewports = 33 screenshots
+Capture notes:
+ - 2 mobile captures hit the 5000 px or 10-scroll cap; crops may cut through content
+ - 1 desktop capture was taken while the page was still changing
+ - 0 failed viewports
 
 Uploaded pages:
  1. /
@@ -278,14 +282,16 @@ Skipped:
  - /users/:id (dynamic route — no sample value provided)
 
 Open Screenote to review and annotate the snapshots.
-Run /feedback when ready.
+Run $screenote:feedback when ready.
 ```
+
+Read `run-status.jsonl` to populate the capture notes, failed viewport count, and any per-route degraded-capture details. After this summary is composed, clean up `$SCREENOTE_DIR`.
 
 ---
 
-## Key Differences from /screenote
+## Key Differences from $screenote:screenote
 
-| Feature | `/screenote` | `/snapshot` |
+| Feature | `$screenote:screenote` | `$screenote:snapshot` |
 |---|---|---|
 | Pages | Single page | All discovered pages |
 | Route discovery | User provides URL | Agent explores codebase |

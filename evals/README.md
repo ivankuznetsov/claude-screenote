@@ -10,10 +10,24 @@ Validates:
 - All skill directories exist with SKILL.md files
 - Frontmatter fields (name, description, user_invocable, argument)
 - Cross-references between skills point to existing files
-- Viewport values (1440x900 desktop, 393x852 mobile) are consistent
+- Viewport values (1280x800 desktop, 768x1024 tablet, 390x844 mobile) are consistent
 - MCP tool names are present where expected
 
 Run on every PR that touches `skills/**/*.md`.
+
+## Browser Use MCP Smoke
+
+Live smoke test for the bundled Browser Use MCP server:
+
+    bash evals/browser-use-mcp-smoke.sh
+
+Validates:
+- `uvx --from browser-use[cli] browser-use --mcp` starts
+- The expected Browser Use MCP direct-control tool names are present
+- `browser_screenshot` exposes `full_page`
+- The current server still has no viewport-sizing tool, so the skills must fail loudly before upload when fixed desktop/tablet/mobile dimensions are required
+
+Run manually before changing browser-use capture behavior. It starts a local MCP subprocess and may install Python packages through `uv`.
 
 ## Trigger Eval Dataset
 

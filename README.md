@@ -8,7 +8,7 @@ Give your AI coding agent eyes. Screenshot any page, snapshot your whole app, an
 
 ### Prerequisites
 
-Screenote launches browser automation through the local [browser-use](https://github.com/browser-use/browser-use) MCP server with `uvx --from browser-use[cli] browser-use --mcp`. Install [uv](https://github.com/astral-sh/uv) and Python 3.11+ so the plugin can start that server on demand.
+Screenote launches browser automation through the local [browser-use](https://github.com/browser-use/browser-use) MCP server with `uvx --from browser-use[cli] browser-use --mcp`. Install [uv](https://github.com/astral-sh/uv) and Python 3.11+ so the plugin can start that server on demand. The bundled MCP config sets `BROWSER_USE_HEADLESS=false` so manual login opens a visible Chromium window; change it to `true` only for fully public/headless runs.
 
 Also install **ImageMagick** — the default capture path uses `identify` to measure every page and `convert` to crop any page taller than 5000 px, so it is required, not optional. On ImageMagick 7+ the canonical binary is `magick`; `convert`/`identify` ship as compatibility aliases on most distros, but on IM7-only systems (recent Arch, Fedora 40+) you may need to invoke them as `magick convert` / `magick identify`.
 
@@ -69,7 +69,7 @@ The agent discovers all routes in your codebase, handles authentication, and scr
 - Screenote now ships its own browser-use MCP server configuration instead of depending on a host-provided Playwright MCP server.
 - `/screenote` and `/snapshot` capture full scrolling pages by default, not just the first viewport.
 - Long or infinite-scroll pages are capped at the first **5000 px or 10 scrolls** (whichever fires first) so captures finish predictably.
-- Sticky headers, footers, and sidebars are left in place. They can repeat if the fallback stitched capture path is used.
+- Sticky headers, footers, and sidebars stay in place. They can repeat if the fallback stitched capture path is used.
 
 ## How It Works
 

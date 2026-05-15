@@ -35,25 +35,38 @@ Fixed defaults (match Screenote server's canonical set):
 
 By default, `/screenote` captures the entire scrolling page, not only the first viewport. Pages taller than **5000 px** are capped at the first 5000 px (or after **10** downward scrolls, whichever fires first), and lazy-loaded pages are scrolled before capture. Sticky headers, footers, and sidebars stay in place; if stitching is needed, repeated sticky elements are expected.
 
-Use the direct-control tools exposed by the `browser-use` MCP server. The current local server exposes navigation, page state, HTML, scrolling, and screenshot tools, and its screenshot tool accepts `full_page: true`. If the active `browser-use` MCP server does not expose a way to set the target viewport dimensions, fail loudly and name the missing viewport-sizing capability instead of silently uploading the wrong dimensions. This canonical "fail loudly when viewport sizing is missing" rule is referenced from §4c step 1 and from `/snapshot` Strategy B.
+Use the direct-control tools exposed by the `browser-use` MCP server. The pinned smoke test in `evals/browser-use-mcp-smoke.sh` verifies `browser_navigate`, `browser_get_state`, `browser_get_html`, `browser_screenshot`, `browser_scroll`, and `browser_screenshot.full_page`. It also verifies that the current local MCP surface has no viewport-sizing tool. If the active `browser-use` MCP server does not expose a way to set the target viewport dimensions, fail loudly before requesting upload URLs: stop processing, do not upload partial or wrong-dimension screenshots, and tell the user exactly that Browser Use MCP lacks viewport sizing for Screenote's desktop/tablet/mobile capture contract. This canonical rule is referenced from §4c step 1 and from `/snapshot` Strategy B.
 
 Full-page procedure for each viewport:
 
-Before the loop, initialize a per-viewport `cap_fired` flag to `false`. Set it to `true` whenever the 5000 px height limit or the 10-scroll limit stops the scroll loop or triggers a post-screenshot crop. Step 5 of Capture Mode reads this flag and tells the user which viewports were truncated.
+Before the loop, set `SCREENOTE_OUTPUT` to the target PNG path for this viewport. For `/screenote`, use `$SCREENOTE_DIR/<viewport>.png`; `/snapshot` may set a route-scoped path such as `$SCREENOTE_DIR/<i>-<viewport>.png`. Also ensure `SCREENOTE_STATUS="$SCREENOTE_DIR/run-status.jsonl"` exists. Record per-viewport facts in that JSONL file, not only in working memory: `cap_fired`, `unsettled_poll`, `unverified_scroll_top`, `failed`, and `failure_reason`.
 
-1. After navigating, settle the page by polling browser-use MCP page state and/or HTML until loading UI is gone and URL/title/HTML size/interactive-element count are stable across consecutive checks. Do not use fixed sleeps. Cap this poll at **15 iterations**; if the page never stabilizes (live clock, animated counter, auto-refreshing feed), proceed anyway and note the unsettled poll in the Step 5 report so the reviewer knows the screenshot was taken under a still-changing page.
+1. After navigating, settle the page by polling `browser_get_state` and/or `browser_get_html` until loading UI is gone and URL/title/HTML size/interactive-element count are stable across consecutive checks. Do not use fixed sleeps. Cap this poll at **15 iterations**; if the page never stabilizes (live clock, animated counter, auto-refreshing feed), proceed anyway and record `unsettled_poll=true` in `run-status.jsonl` so the caller's summary can say the screenshot was taken under a still-changing page.
 2. Read the page-state metadata to get the current viewport height, current scroll position, and document height. If height metadata is unavailable, continue with the scroll loop but report that the cap was enforced by scroll count.
-3. Scroll downward by one viewport at a time with the browser-use MCP scroll tool. After each scroll, poll page state again so lazy-loaded content can extend the page. Stop when the document height no longer grows between consecutive scrolls, the total scrolled distance reaches **5000 px**, or **10** downward scrolls have run, whichever happens first. If the 5000 px or 10-scroll limit stopped the loop, set `cap_fired = true`.
-4. Scroll back to the top. Use upward scrolls and verify via page-state metadata that the scroll position returned to zero before capturing. If the page-state metadata does not expose scroll position (the same branch as step 2's "height metadata is unavailable" path), scroll upward at least as many times as the down-scroll loop ran and continue — note this fallback in the Step 5 report so the reviewer knows the scroll-to-top was unverified.
-5. Preferred capture path: call the browser-use MCP screenshot tool with `full_page: true`. The tool returns the PNG as MCP image content (base64-encoded `data` field on an `image` content block); base64-decode that field and write the raw bytes to `$SCREENOTE_DIR/<viewport>.png`. Then check dimensions with `identify -format "%wx%h"`. If the image is taller than 5000 px, set `cap_fired = true` and crop to a temp file before renaming so the read and write never share a path:
+3. Scroll downward by one viewport at a time with `browser_scroll`. After each scroll, poll page state again so lazy-loaded content can extend the page. Stop when the document height no longer grows between consecutive scrolls, the total scrolled distance reaches **5000 px**, or **10** downward scrolls have run, whichever happens first. If the 5000 px or 10-scroll limit stopped the loop, set `cap_fired = true`.
+4. Scroll back to the top. Use upward scrolls and verify via page-state metadata that the scroll position returned to zero before capturing. If the page-state metadata does not expose scroll position, record `unverified_scroll_top=true` and do **not** use the preferred full-page crop path; use the fallback tile path only if visible screenshots can be captured after the upward-scroll attempts. If top position still cannot be made credible, fail loudly instead of uploading a possibly mid-page crop.
+5. Preferred capture path: call `browser_screenshot` with `full_page: true` only when the active tool schema exposes that exact field. The tool returns the PNG as MCP image content (base64-encoded `data` field on an `image` content block). Write the `data` value to `$SCREENOTE_OUTPUT.b64`, then decode it with `base64 -d "$SCREENOTE_OUTPUT.b64" > "$SCREENOTE_OUTPUT"`. If the image content is too large for the MCP client and the tool call fails before returning bytes, switch to the fallback tile path. Preflight ImageMagick before checking dimensions:
    ```bash
-   convert "$SCREENOTE_DIR/<viewport>.png" -crop x5000+0+0 +repage "$SCREENOTE_DIR/<viewport>.tmp.png"
-   mv "$SCREENOTE_DIR/<viewport>.tmp.png" "$SCREENOTE_DIR/<viewport>.png"
+   if command -v magick >/dev/null 2>&1; then
+     IM_IDENTIFY='magick identify'
+     IM_CONVERT='magick convert'
+   elif command -v identify >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then
+     IM_IDENTIFY='identify'
+     IM_CONVERT='convert'
+   else
+     echo "ImageMagick is required for Screenote full-page captures (install magick or identify/convert)." >&2
+     exit 1
+   fi
+   $IM_IDENTIFY -format "%wx%h" "$SCREENOTE_OUTPUT"
+   $IM_CONVERT "$SCREENOTE_OUTPUT" -crop x5000+0+0 +repage "$SCREENOTE_OUTPUT.tmp.png"
+   mv "$SCREENOTE_OUTPUT.tmp.png" "$SCREENOTE_OUTPUT"
    ```
-6. Fallback capture path: if the screenshot tool cannot capture full-page images but can capture the visible viewport, capture viewport-sized PNG tiles while scrolling from top to bottom (decode and write each tile as `$SCREENOTE_DIR/tile-001.png`, `tile-002.png`, … using a zero-padded three-digit index so lexicographic shell ordering matches scroll order even past nine tiles). Stop at the 5000 px / 10-scroll cap (setting `cap_fired = true` if the cap fired), stitch with `convert "$SCREENOTE_DIR"/tile-*.png -append "$SCREENOTE_DIR/<viewport>.png"`, then crop to 5000 px using the temp-file pattern above if needed.
+   Only run the crop commands when the measured height is greater than 5000 px; when cropping, record `cap_fired=true` and warn that the 5000 px cap can bisect page content.
+6. Fallback capture path: if the screenshot tool cannot capture full-page images but can capture the visible viewport, capture viewport-sized PNG tiles while scrolling from top to bottom. Decode and write each tile as `${SCREENOTE_OUTPUT%.png}-tile-001.png`, `${SCREENOTE_OUTPUT%.png}-tile-002.png`, etc. using a zero-padded three-digit index so lexicographic shell ordering matches scroll order even past nine tiles and different viewports/routes cannot reuse stale tiles. Stop at the 5000 px or 10-scroll cap (setting `cap_fired = true` if the cap fired). If no tile files were produced, fail loudly. Stitch with `$IM_CONVERT "${SCREENOTE_OUTPUT%.png}"-tile-*.png -append "$SCREENOTE_OUTPUT"`, verify the output file exists, then crop to 5000 px using the temp-file pattern above if needed.
 7. Last resort: if neither full-page screenshot nor visible-viewport screenshot plus scrolling is available, fail loudly with the missing browser-use MCP capability so the user knows to upgrade browser-use.
+8. Append one JSON object to `run-status.jsonl` for this viewport before returning to the caller. Include `viewport`, `output`, `cap_fired`, `unsettled_poll`, `unverified_scroll_top`, `failed`, and `failure_reason`.
 
-ImageMagick is required on the machine running the agent for **both** capture paths: the preferred path calls `identify` on every page and `convert` on any page taller than 5000 px, and the fallback path uses `convert` to stitch tiles. On ImageMagick 7+ the canonical binary is `magick`; the `convert`/`identify` names still work as compatibility aliases on most distros, but on IM7-only systems you may need to invoke them as `magick identify` / `magick convert`.
+ImageMagick is required on the machine running the agent for **both** capture paths: the preferred path calls `identify` on every page and `convert` on any page taller than 5000 px, and the fallback path uses `convert` to stitch tiles. On ImageMagick 7+ the canonical binary is `magick`; the preflight above supports both `magick identify` / `magick convert` and the older `identify` / `convert` aliases.
 
 ---
 
@@ -151,6 +164,8 @@ Never interpolate server-returned strings directly into shell commands — alway
 
 ```bash
 SCREENOTE_DIR=$(mktemp -d /tmp/screenote-XXXXXX)
+SCREENOTE_STATUS="$SCREENOTE_DIR/run-status.jsonl"
+: > "$SCREENOTE_STATUS"
 ```
 
 Fixed `/tmp/...` paths would collide with concurrent `/screenote` runs and are a symlink-attack target on shared machines; `mktemp -d` avoids both.
@@ -159,14 +174,14 @@ Fixed `/tmp/...` paths would collide with concurrent `/screenote` runs and are a
 
 browser-use MCP keeps browser state in a shared session, so do **not** parallelize. For each `entry` in `uploads`, in order:
 
-1. **Set viewport** to the dimensions from the Viewport Dimensions table above, keyed on `entry.viewport`, using the browser-use MCP viewport-sizing capability. (See the Full-Page Capture intro above for the canonical fail-loudly behavior when this capability is absent.)
-2. **Navigate** to the URL using the browser-use MCP navigation tool. Fresh navigate per viewport — safer for SPAs that read viewport at mount time than a resize-only flow.
-3. **Screenshot** by running the Full-Page Capture procedure above (settling, scroll-down, scroll-back, capture, crop), producing `$SCREENOTE_DIR/<viewport>.png` as PNG bytes. Settling is handled inside that procedure — do not re-poll here.
+1. **Set viewport** to the dimensions from the Viewport Dimensions table above, keyed on `entry.viewport`, using the browser-use MCP viewport-sizing capability. If this capability is absent, stop before capture/upload and use the fail-loudly wording from the Full-Page Capture intro.
+2. **Navigate** to the URL using `browser_navigate`. Fresh navigate per viewport — safer for SPAs that read viewport at mount time than a resize-only flow.
+3. **Screenshot** by setting `SCREENOTE_OUTPUT="$SCREENOTE_DIR/<viewport>.png"` and running the Full-Page Capture procedure above (settling, scroll-down, scroll-back, capture, crop), producing PNG bytes at that path. Settling is handled inside that procedure — do not re-poll here.
 4. **Upload** via curl using a shell variable for the URL — do not interpolate the value inline:
    ```bash
    UPLOAD_URL='<validated upload_url from 4a>'
    curl -fsS -X PUT -H 'Content-Type: image/png' \
-     --data-binary @"$SCREENOTE_DIR/<viewport>.png" \
+     --data-binary @"$SCREENOTE_OUTPUT" \
      "$UPLOAD_URL"
    ```
    `-f` turns 4xx into a non-zero exit so the retry path (4d) can trigger.
@@ -174,7 +189,7 @@ browser-use MCP keeps browser state in a shared session, so do **not** paralleli
 
 #### 4d. Token-expiry retry
 
-If any `curl` exits non-zero with a 4xx status (token expired or rejected), call `create_multi_viewport_screenshot` **once** again for this same `(project_id, page_name, title)` to get fresh upload URLs, re-validate them (4a), and retry the remaining viewports from the start of the failed one. On a second failure, record the viewport as failed and continue with the next one; include failures in the Step 5 summary.
+If any `curl` exits non-zero with a 4xx status (token expired or rejected), call `create_multi_viewport_screenshot` **once** again for this same `(project_id, page_name, title)` to get fresh upload URLs, re-validate them (4a), and retry the remaining viewports from the start of the failed one. On a second failure, append `failed=true` and the upload error to `run-status.jsonl`, then continue with the next viewport; include failures in the Step 5 summary.
 
 Note: re-calling `create_multi_viewport_screenshot` with the same `page_name`/`title` will create a new Screenshot grouped under the same Page. Acceptable for single-page retry; for batch runs (`/snapshot`), callers should decide whether to retry per-route or skip.
 
@@ -184,7 +199,7 @@ Note: re-calling `create_multi_viewport_screenshot` with the same `page_name`/`t
 rm -rf "$SCREENOTE_DIR"
 ```
 
-Run cleanup whether capture succeeded or failed.
+Do not delete `$SCREENOTE_DIR` until Step 5 has read `run-status.jsonl`. After the user-facing report is composed, run cleanup whether capture succeeded or failed.
 
 ### Step 5: Report to User
 
@@ -193,5 +208,7 @@ Tell the user:
 - Say "Uploaded to **<project_name>**" and provide the **annotate_url** so they can open it in the browser and add annotations
 - Mention they can switch between viewports in Screenote using the device-icon toolbar
 - Tell them to run `/feedback` when they're done annotating
-- If `cap_fired` was set for any viewport during Full-Page Capture, say "Captured the first 5000 px or 10 scrolls; the page may extend further" and name which viewports were truncated
+- Read `run-status.jsonl`; if `cap_fired` is true for any viewport, say "Captured the first 5000 px or 10 scrolls; the page may extend further and the crop may cut through content" and name which viewports were truncated
+- If `unsettled_poll` or `unverified_scroll_top` is true for any viewport, name those viewports so the reviewer knows the capture happened under a degraded condition
 - If any viewport failed after retry, list it explicitly
+- After reading the ledger and composing this report, clean up `$SCREENOTE_DIR`

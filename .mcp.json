@@ -9,7 +9,7 @@
       "command": "uvx",
       "args": ["--from", "browser-use[cli]", "browser-use", "--mcp"],
       "env": {
-        "BROWSER_USE_HEADLESS": "${BROWSER_USE_HEADLESS:-true}"
+        "BROWSER_USE_HEADLESS": "false"
       }
     }
   }
